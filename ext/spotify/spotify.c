@@ -2,8 +2,8 @@
 #include "config.h"
 #endif
 
-#include "spotify.h"
-#include "php_spotify.h"
+#include "php.h"
+#include "spotify.h" // Our own header
 
 static function_entry spotify_functions[] = {
     PHP_FE(hello_world, NULL)
@@ -14,8 +14,8 @@ zend_module_entry spotify_module_entry = {
 #if ZEND_MODULE_API_NO >= 20010901
     STANDARD_MODULE_HEADER,
 #endif
-    PHP_HELLO_WORLD_EXTNAME,
-    hello_functions,
+    PHP_SPOTIFY_EXTNAME,
+    spotify_functions,
     NULL,
     NULL,
     NULL,
@@ -27,7 +27,7 @@ zend_module_entry spotify_module_entry = {
     STANDARD_MODULE_PROPERTIES
 };
 
-#ifdef COMPILE_DL_HELLO
+#ifdef COMPILE_DL_SPOTIFY
 ZEND_GET_MODULE(spotify)
 #endif
 

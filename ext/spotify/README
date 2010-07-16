@@ -1,0 +1,5 @@
+Build Instructions
+
+	phpize
+	./configure --enable-spotify
+	make
