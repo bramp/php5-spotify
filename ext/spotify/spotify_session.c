@@ -68,21 +68,21 @@ static void log_message (sp_session *session, const char *data) {
 }
 
 
-//sp_session * g_session = NULL;
-
+/* {{{ proto string spotify_session_login(string username, string password, string appkey)
+   Logs into spotify and returns a session resource on success */
 PHP_FUNCTION(spotify_session_login) {
 	sp_session_config config;
 	sp_session *session;
 
 	sp_error error;
 
-	char *user;
-	char *pass;
-	char *key;
+	php_spotify_session *resource;
 
-	int user_len;
-	int pass_len;
-	int key_len;
+	char * cache_location;
+	char * settings_location;
+
+	char *user, *pass, *key;
+	int user_len, pass_len, key_len;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "sss",
 		&user, &user_len,
@@ -91,22 +91,47 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
-	config.api_version = SPOTIFY_API_VERSION;
-	config.cache_location    = "tmp"; // TODO change these to be based on the user
-	config.settings_location = "tmp";
+	if (user_len < 1) {
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank username was given");
+		RETURN_FALSE;
+	}
 
-	config.application_key = key;
+	if (pass_len < 1) {
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank password was given");
+		RETURN_FALSE;
+	}
+
+	if (key_len < 1) {
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank appkey was given");
+		RETURN_FALSE;
+	}
+
+	spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
+	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
+
+	config.api_version       = SPOTIFY_API_VERSION;
+	config.cache_location    = cache_location;
+	config.settings_location = settings_location;
+
+	config.application_key      = key;
 	config.application_key_size = key_len;
 
 	config.user_agent = "libspotify for PHP";
 	config.callbacks = &callbacks;
 
+	// Create the session
 	error = sp_session_init(&config, &session);
+
+	// Ensure we always free these strings
+	efree(cache_location);
+	efree(settings_location);
+
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
 		RETURN_FALSE;
 	}
 
+	// Now try and log in
 	error = sp_session_login(session, user, pass);
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
@@ -114,11 +139,17 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
-	// Wait for login?
+	// TODO Wait for login
 
-	RETURN_TRUE;
+	resource = emalloc(sizeof(php_spotify_session));
+	resource->session = session;
+
+	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
 }
+/* }}} */
 
+/* {{{ proto bool spotify_session_logout(resource session)
+   Logs out of spotify and returns true on success */
 PHP_FUNCTION(spotify_session_logout) {
 
 	sp_session *session;
@@ -135,3 +166,35 @@ PHP_FUNCTION(spotify_session_logout) {
 
 	RETURN_TRUE;
 }
+/* }}} */
+
+/* {{{ proto int spotify_session_connectionstate(resource session)
+   Returns the state the session is in */
+PHP_FUNCTION(spotify_session_connectionstate) {
+
+}
+/* }}} */
+
+/* {{{ proto string spotify_session_user(resource session)
+   Returns the currently logged in user */
+PHP_FUNCTION(spotify_session_user) {
+    php_spotify_session *session;
+    zval *zsession;
+    sp_user * user;
+
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &zsession) == FAILURE) {
+        RETURN_FALSE;
+    }
+
+    // Check its a spotify session (otherwise RETURN_FALSE)
+    ZEND_FETCH_RESOURCE(session, php_spotify_session*, &zsession, -1, PHP_SPOTIFY_SESSION_RES_NAME, le_spotify_session);
+
+    user = sp_session_user(session->session);
+    if (user == NULL) {
+        php_error_docref(NULL TSRMLS_CC, E_ERROR, "The session is not logged in.");
+        RETURN_FALSE;
+    }
+
+    RETURN_STRING(sp_user_canonical_name(user), 1);
+}
+/* }}} */

@@ -24,6 +24,14 @@ extern zend_module_entry spotify_module_entry;
 # include "TSRM.h"
 #endif
 
+typedef struct _php_spotify_session {
+	sp_session *session;
+} php_spotify_session;
+
+#define PHP_SPOTIFY_SESSION_RES_NAME "Spotify Session"
+
+extern int le_spotify_session;
+
 PHP_MINIT_FUNCTION(spotify);
 PHP_RINIT_FUNCTION(spotify);
 PHP_MSHUTDOWN_FUNCTION(spotify);
@@ -32,6 +40,8 @@ PHP_MINFO_FUNCTION(spotify);
 
 PHP_FUNCTION(spotify_session_login);
 PHP_FUNCTION(spotify_session_logout);
+PHP_FUNCTION(spotify_session_connectionstate);
+PHP_FUNCTION(spotify_session_user);
 
 PHP_FUNCTION(spotify_playlist_create);
 PHP_FUNCTION(spotify_playlist_name);
@@ -40,6 +50,7 @@ PHP_FUNCTION(spotify_playlist_add_tracks);
 PHP_FUNCTION(spotify_playlist_uri);
 
 PHP_FUNCTION(spotify_last_error);
+PHP_FUNCTION(spotify_error_message);
 
 ZEND_BEGIN_MODULE_GLOBALS(spotify)
 	sp_error last_error; // The error code for the last error
