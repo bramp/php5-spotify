@@ -9,7 +9,7 @@
 #endif
 
 #include "php.h"
-#include "spotify.h" // Our own header
+#include "php_spotify.h"
 
 PHP_FUNCTION(spotify_last_error) {
 
