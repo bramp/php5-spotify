@@ -7,6 +7,7 @@
 #ifndef PHP_SPOTIFY_H
 #define PHP_SPOTIFY_H
 
+#include <pthread.h>
 #include <libspotify/api.h>
 
 extern zend_module_entry spotify_module_entry;
@@ -20,12 +21,23 @@ extern zend_module_entry spotify_module_entry;
 #	define PHP_SPOTIFY_API
 #endif
 
+#define DEBUG_SPOTIFY
+
+#ifdef DEBUG_SPOTIFY
+# define DEBUG_PRINT(f, s...) php_printf("%X ", pthread_self()); php_printf(f, ## s)
+#else
+# define DEBUG_PRINT(f)
+#endif
+
 #ifdef ZTS
 # include "TSRM.h"
 #endif
 
 typedef struct _php_spotify_session {
-	sp_session *session;
+	sp_session *session;    // Spotify session
+	int events;             // The number of process events waiting
+	pthread_mutex_t mutex;  // Mutex to lock on when blocking
+	pthread_cond_t  cv;     // Conditional var for blocking
 } php_spotify_session;
 
 #define PHP_SPOTIFY_SESSION_RES_NAME "Spotify Session"

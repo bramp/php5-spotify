@@ -11,20 +11,152 @@
 #include "php.h"
 #include "php_spotify.h"
 
+#include <assert.h>
+#include <pthread.h>
+
+// This must be called with session->mutex held
+void check_process_events_lock(php_spotify_session *session) {
+	assert(session != NULL);
+	DEBUG_PRINT("check_process_events_lock (%d)\n", session->events);
+
+	while (session->events > 0) {
+		int timeout = -1;
+		DEBUG_PRINT("check_process_events_lock loop(%d)\n", session->events);
+
+		sp_session_process_events(session->session, &timeout);
+		session->events--;
+	}
+
+	DEBUG_PRINT("check_process_events_lock end\n");
+}
+
+// For some reason libspotify requires events run on the main loop
+// So we check for if it needs to be run, and run it.
+void check_process_events(php_spotify_session *session) {
+	assert(session != NULL);
+	DEBUG_PRINT("check_process_events\n");
+
+	pthread_mutex_lock    (&session->mutex);
+	check_process_events_lock(session);
+	pthread_mutex_unlock  (&session->mutex);
+
+	DEBUG_PRINT("check_process_events end\n");
+}
+
+// Loops waiting for a logged in event
+// If one is not found after X seconds, a error is returned.
+int wait_for_logged_in(php_spotify_session *session) {
+	struct timespec ts;
+	int err = 0;
+
+	assert(session != NULL);
+
+	DEBUG_PRINT("wait_for_logged_in start\n");
+
+	// Block for a max of 5 seconds
+	clock_gettime(CLOCK_REALTIME, &ts);
+	ts.tv_sec += 10;
+
+	pthread_mutex_lock(&session->mutex);
+	while(err == 0) {
+		DEBUG_PRINT("wait_for_logged_in loop\n");
+
+		// We first check if we need to process any events
+		check_process_events_lock(session);
+
+		// If we are finally logged in break.
+		sp_connectionstate state = sp_session_connectionstate(session->session);
+		if (state == SP_CONNECTION_STATE_LOGGED_IN)
+			break;
+
+		// Wait until a callback is fired
+		err = pthread_cond_timedwait(&session->cv, &session->mutex, &ts);
+	}
+	pthread_mutex_unlock(&session->mutex);
+
+	DEBUG_PRINT("wait_for_logged_in end(%d)\n", err);
+	return err;
+}
+
+// Must be called with session->mutex held
+void wakeup_thread_lock(php_spotify_session *session) {
+	assert(session != NULL);
+	DEBUG_PRINT("wakeup_thread_lock\n");
+	pthread_cond_broadcast(&session->cv);
+}
+
+// Wake up any threads waiting for an event
+void wakeup_thread(php_spotify_session *session) {
+	assert(session != NULL);
+
+	DEBUG_PRINT("wakeup_thread\n");
+
+	pthread_mutex_lock   (&session->mutex);
+	wakeup_thread_lock   (session);
+	pthread_mutex_unlock (&session->mutex);
+}
+
 /**
  * Session callbacks
  */
+static void logged_in (sp_session *session, sp_error error) {
+	php_spotify_session *resource = sp_session_userdata(session);
+	assert(resource != NULL);
 
-static void logged_in          (sp_session *session, sp_error error);
-static void logged_out         (sp_session *session);
-static void metadata_updated   (sp_session *session);
-static void connection_error   (sp_session *session, sp_error error);
-static void message_to_user    (sp_session *session, const char *message);
-static void notify_main_thread (sp_session *session);
-static int  music_delivery     (sp_session *session, const sp_audioformat *format, const void *frames, int num_frames);
-static void play_token_lost    (sp_session *session);
-static void log_message        (sp_session *session, const char *data);
-static void end_of_track       (sp_session *session);
+	DEBUG_PRINT("logged_in\n");
+
+	// Broadcast that we have now logged in
+	wakeup_thread(resource);
+}
+
+static void logged_out (sp_session *session) {
+	DEBUG_PRINT("logged_out\n");
+}
+
+static void metadata_updated (sp_session *session) {
+	php_spotify_session *resource = sp_session_userdata(session);
+	assert(resource != NULL);
+
+	DEBUG_PRINT("metadata_updated\n");
+
+	// Broadcast that we have some extra metadata
+	wakeup_thread(resource);
+}
+
+static void connection_error (sp_session *session, sp_error error) {
+	DEBUG_PRINT("connection_error\n");
+}
+
+static void message_to_user (sp_session *session, const char *message) {
+	DEBUG_PRINT("message_to_user: %s", message);
+}
+
+static void notify_main_thread (sp_session *session) {
+	php_spotify_session *resource = sp_session_userdata(session);
+	assert(resource != NULL);
+
+	DEBUG_PRINT("notify_main_thread\n");
+
+	// Signal that an event is queued and needs to be run on the main thread
+	pthread_mutex_lock(&resource->mutex);
+
+	resource->events++;
+
+	// Wake up everything (so we get a chance to run the event code)
+	wakeup_thread_lock(resource);
+
+	pthread_mutex_unlock(&resource->mutex);
+}
+
+static void log_message (sp_session *session, const char *data) {
+	DEBUG_PRINT("log_message: %s", data);
+}
+
+// Some callbacks we are not interested in, but written down for future's sake
+//static int  music_delivery  (sp_session *session, const sp_audioformat *format, const void *frames, int num_frames);
+//static void play_token_lost (sp_session *session);
+//static void end_of_track    (sp_session *session);
+
 
 static sp_session_callbacks callbacks = {
 	&logged_in,
@@ -39,44 +171,17 @@ static sp_session_callbacks callbacks = {
 	NULL, //&end_of_track,
 };
 
-static void logged_in (sp_session *session, sp_error error) {
-	php_printf("logged_in\n");
-}
-
-static void logged_out (sp_session *session) {
-	php_printf("logged_out\n");
-}
-
-static void metadata_updated (sp_session *session) {
-	php_printf("metadata_updated\n");
-}
-
-static void connection_error (sp_session *session, sp_error error) {
-	php_printf("connection_error\n");
-}
-
-static void message_to_user (sp_session *session, const char *message) {
-	php_printf("message_to_user(%s)\n", message);
-}
-
-static void notify_main_thread (sp_session *session) {
-	php_printf("notify_main_thread\n");
-}
-
-static void log_message (sp_session *session, const char *data) {
-	php_printf("log_message(%s)\n", data);
-}
-
-
 /* {{{ proto string spotify_session_login(string username, string password, string appkey)
-   Logs into spotify and returns a session resource on success */
+   Logs into spotify and returns a session resource on success
+   TODO Ensure there is only one session at a time, and that this session is always for the same user
+*/
 PHP_FUNCTION(spotify_session_login) {
 	sp_session_config config;
-	sp_session *session;
 
 	sp_error error;
 
 	php_spotify_session *resource;
+	int err;
 
 	char * cache_location;
 	char * settings_location;
@@ -106,6 +211,21 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
+	// Create the resource object
+	resource = emalloc(sizeof(php_spotify_session));
+	resource->session = NULL;
+	resource->events  = 0;
+
+	if ( err = pthread_mutex_init(&resource->mutex, NULL) ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init failed!");
+		RETURN_FALSE;
+	}
+
+	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
+		RETURN_FALSE;
+	}
+
 	spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
 	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
 
@@ -119,8 +239,11 @@ PHP_FUNCTION(spotify_session_login) {
 	config.user_agent = "libspotify for PHP";
 	config.callbacks = &callbacks;
 
+	// Pass the resource to libspotify as userdata
+	config.userdata = resource;
+
 	// Create the session
-	error = sp_session_init(&config, &session);
+	error = sp_session_init(&config, &resource->session);
 
 	// Ensure we always free these strings
 	efree(cache_location);
@@ -132,21 +255,27 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	// Now try and log in
-	error = sp_session_login(session, user, pass);
+	error = sp_session_login(resource->session, user, pass);
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
 		// TODO In the future libspotify will add sp_session_release. Call that here.
 		RETURN_FALSE;
 	}
 
-	// TODO Wait for login
-
-	resource = emalloc(sizeof(php_spotify_session));
-	resource->session = session;
+	err = wait_for_logged_in(resource);
+	if (err == ETIMEDOUT) {
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Timeout while logging in.");
+		RETURN_FALSE;
+	}
 
 	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
 }
 /* }}} */
+
+/*
+ * pthread_mutex_destroy(&resource->mutex)
+ * pthread_cond_destroy(&resource->cv)
+ */
 
 /* {{{ proto bool spotify_session_logout(resource session)
    Logs out of spotify and returns true on success */
