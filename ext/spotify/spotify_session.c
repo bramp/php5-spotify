@@ -325,18 +325,21 @@ PHP_FUNCTION(spotify_session_login) {
 }
 /* }}} */
 
-/*
- * pthread_mutex_destroy(&resource->mutex)
- * pthread_cond_destroy(&resource->cv)
- */
-
 /* {{{ proto bool spotify_session_logout(resource session)
    Logs out of spotify and returns true on success */
 PHP_FUNCTION(spotify_session_logout) {
 
-	sp_session *session;
+    php_spotify_session *session;
+    zval *zsession;
 
-	sp_error error = sp_session_logout(session);
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &zsession) == FAILURE) {
+        RETURN_FALSE;
+    }
+
+    // Check its a spotify session (otherwise RETURN_FALSE)
+    ZEND_FETCH_RESOURCE(session, php_spotify_session*, &zsession, -1, PHP_SPOTIFY_SESSION_RES_NAME, le_spotify_session);
+
+	sp_error error = sp_session_logout(session->session);
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
 		RETURN_FALSE;
@@ -351,9 +354,19 @@ PHP_FUNCTION(spotify_session_logout) {
 /* }}} */
 
 /* {{{ proto int spotify_session_connectionstate(resource session)
-   Returns the state the session is in */
+   Returns the state the session is in. */
 PHP_FUNCTION(spotify_session_connectionstate) {
+    php_spotify_session *session;
+    zval *zsession;
 
+    if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "r", &zsession) == FAILURE) {
+        RETURN_FALSE;
+    }
+
+    // Check its a spotify session (otherwise RETURN_FALSE)
+    ZEND_FETCH_RESOURCE(session, php_spotify_session*, &zsession, -1, PHP_SPOTIFY_SESSION_RES_NAME, le_spotify_session);
+
+	RETURN_LONG( sp_session_connectionstate(session->session) );
 }
 /* }}} */
 
