@@ -35,9 +35,13 @@ extern zend_module_entry spotify_module_entry;
 
 typedef struct _php_spotify_session {
 	sp_session *session;    // Spotify session
-	int events;             // The number of process events waiting
+	sp_error last_error;    // The last error that has occured (used for handing back to main thread)
+
 	pthread_mutex_t mutex;  // Mutex to lock on when blocking
 	pthread_cond_t  cv;     // Conditional var for blocking
+
+	int events;             // The number of process events waiting
+	int waiting_login;      // The number of login callbacks we are waiting for
 } php_spotify_session;
 
 #define PHP_SPOTIFY_SESSION_RES_NAME "Spotify Session"

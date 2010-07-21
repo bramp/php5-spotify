@@ -63,6 +63,8 @@ int wait_for_logged_in(php_spotify_session *session) {
 	ts.tv_sec += 10;
 
 	pthread_mutex_lock(&session->mutex);
+	session->waiting_login++;
+
 	while(err == 0) {
 		DEBUG_PRINT("wait_for_logged_in loop\n");
 
@@ -70,8 +72,7 @@ int wait_for_logged_in(php_spotify_session *session) {
 		check_process_events_lock(session);
 
 		// If we are finally logged in break.
-		sp_connectionstate state = sp_session_connectionstate(session->session);
-		if (state == SP_CONNECTION_STATE_LOGGED_IN)
+		if (session->waiting_login == 0)
 			break;
 
 		// Wait until a callback is fired
@@ -108,10 +109,18 @@ static void logged_in (sp_session *session, sp_error error) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("logged_in\n");
+	DEBUG_PRINT("logged_in (%d)\n", error);
 
-	// Broadcast that we have now logged in
-	wakeup_thread(resource);
+	pthread_mutex_lock   (&resource->mutex);
+
+	resource->waiting_login--;
+
+	if (error != SP_ERROR_OK)
+		resource->last_error = error;
+
+	// Broadcast that we have now logged in (or not)
+	wakeup_thread_lock   (resource);
+	pthread_mutex_unlock (&resource->mutex);
 }
 
 static void logged_out (sp_session *session) {
@@ -176,6 +185,45 @@ static sp_session_callbacks callbacks = {
 	NULL, //&end_of_track,
 };
 
+// Creates a session resource object
+php_spotify_session * session_resource_create() {
+
+	int err;
+	php_spotify_session * resource = emalloc(sizeof(php_spotify_session));
+
+	resource->session       = NULL;
+	resource->events        = 0;
+	resource->waiting_login = 0;
+
+	if ( err = pthread_mutex_init(&resource->mutex, NULL) ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init failed!");
+
+		efree(resource);
+
+		return NULL;
+	}
+
+	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
+
+		pthread_mutex_destroy(&resource->mutex);
+		efree(resource);
+
+		return NULL;
+	}
+
+	return resource;
+}
+
+void session_resource_destory(php_spotify_session *resource) {
+	assert(resource != NULL);
+
+	pthread_mutex_destroy(&resource->mutex);
+	pthread_cond_destroy (&resource->cv);
+
+	efree(resource);
+}
+
 /* {{{ proto string spotify_session_login(string username, string password, string appkey)
    Logs into spotify and returns a session resource on success
    TODO Ensure there is only one session at a time, and that this session is always for the same user
@@ -216,20 +264,7 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
-	// Create the resource object
-	resource = emalloc(sizeof(php_spotify_session));
-	resource->session = NULL;
-	resource->events  = 0;
-
-	if ( err = pthread_mutex_init(&resource->mutex, NULL) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init failed!");
-		RETURN_FALSE;
-	}
-
-	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
-		RETURN_FALSE;
-	}
+	resource = session_resource_create();
 
 	spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
 	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
@@ -256,6 +291,7 @@ PHP_FUNCTION(spotify_session_login) {
 
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
+		session_resource_destory(resource);
 		RETURN_FALSE;
 	}
 
@@ -264,12 +300,21 @@ PHP_FUNCTION(spotify_session_login) {
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
 		// TODO In the future libspotify will add sp_session_release. Call that here.
+		session_resource_destory(resource);
 		RETURN_FALSE;
 	}
 
 	err = wait_for_logged_in(resource);
 	if (err == ETIMEDOUT) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Timeout while logging in.");
+		session_resource_destory(resource);
+		RETURN_FALSE;
+	}
+
+	sp_connectionstate state = sp_session_connectionstate(resource->session);
+	if (state != SP_CONNECTION_STATE_LOGGED_IN) {
+		SPOTIFY_G(last_error) = resource->last_error;
+		session_resource_destory(resource);
 		RETURN_FALSE;
 	}
 
