@@ -313,7 +313,10 @@ PHP_FUNCTION(spotify_session_login) {
 
 	sp_connectionstate state = sp_session_connectionstate(resource->session);
 	if (state != SP_CONNECTION_STATE_LOGGED_IN) {
+		pthread_mutex_lock(&resource->mutex);
 		SPOTIFY_G(last_error) = resource->last_error;
+		pthread_mutex_unlock(&resource->mutex);
+
 		session_resource_destory(resource);
 		RETURN_FALSE;
 	}
