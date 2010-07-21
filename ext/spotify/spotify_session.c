@@ -23,7 +23,12 @@ void check_process_events_lock(php_spotify_session *session) {
 		int timeout = -1;
 		DEBUG_PRINT("check_process_events_lock loop(%d)\n", session->events);
 
+		// Don't enter sp_session_process_events locked, otherwise
+		// a deadlock might occur
+		pthread_mutex_unlock(&session->mutex);
 		sp_session_process_events(session->session, &timeout);
+		pthread_mutex_lock  (&session->mutex);
+
 		session->events--;
 	}
 
