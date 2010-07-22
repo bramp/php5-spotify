@@ -4,7 +4,12 @@ Build Instructions
 
 	Then to build this library. In ext/spotify execute:
 		phpize
-		./configure --enable-spotify
+		./configure --with-spotify
 		make
+
+	Now configure PHP to use the new extension, by adding a line in your php.ini
+
+		extension=<path to extensions>/spotify.so
+
 
 There is additional documentation in the doc.html

@@ -2,9 +2,13 @@
 /*
  * Config stuff
  */
-	$appkey   = file_get_contents('spotify_appkey.key');
+	$appkey   = @file_get_contents('spotify_appkey.key');
 	$username = 'bramp';
 	$password = 'testpassword';
+
+	if ($appkey === false) {
+		die('Please download a binary libspotify appkey from developer.spotify.com and save it as spotify_appkey.key in the current directory\n');
+	}
 
 /*
  * Some helper code
