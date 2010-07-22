@@ -2,10 +2,11 @@ Build Instructions
 
 	First install libspotify following their instructions
 
-	Then to build this library. In ext/spotify execute:
+	Then to build this library execute:
 		phpize
 		./configure --with-spotify
 		make
+	You might need some packages required for building PHP extensions.
 
 	Now configure PHP to use the new extension, by adding a line in your php.ini
 
