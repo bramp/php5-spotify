@@ -235,7 +235,7 @@ int create_dir(const char *path) {
 	return !S_ISDIR(st.st_mode);
 }
 
-/* {{{ proto string spotify_session_login(string username, string password, string appkey)
+/* {{{ proto resource spotify_session_login(string username, string password, string appkey)
    Logs into spotify and returns a session resource on success
    TODO Ensure there is only one session at a time, and that this session is always for the same user
 */

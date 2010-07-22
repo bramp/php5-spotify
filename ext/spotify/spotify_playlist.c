@@ -145,7 +145,7 @@ void playlist_resource_destory(php_spotify_session *resource) {
 }
 
 /* {{{ proto resource spotify_playlist_create(resource session, string name)
-   Logs out of spotify and returns true on success */
+   Creates a new playlist with the specified name. Returns false on error. */
 PHP_FUNCTION(spotify_playlist_create) {
     sp_playlistcontainer *container;
     sp_playlist *playlist;
@@ -241,7 +241,7 @@ PHP_FUNCTION(spotify_playlist_name) {
 }
 /* }}} */
 
-/* {{{ proto void spotify_playlist_rename(resource playlist, string newname)
+/* {{{ proto bool spotify_playlist_rename(resource playlist, string newname)
    Changes the name of the playlist. Returns true on success or false on error. */
 PHP_FUNCTION(spotify_playlist_rename) {
     php_spotify_playlist *playlist;
