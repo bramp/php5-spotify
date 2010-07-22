@@ -30,10 +30,41 @@
 		die_error('spotify_session_login');
 	}
 
-
 	var_dump ( $session );
 	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
 	echo 'Session user: ' . spotify_session_user( $session ) . "\n";
+
+	// Now create a playlist
+	$playlist = spotify_playlist_create($session, 'Test');
+	if (!$playlist) {
+		die_error('spotify_playlist_create');
+	}
+
+	var_dump ( $playlist );
+	echo 'Playlist name: ' . spotify_playlist_name( $playlist ) . "\n";
+	echo 'Playlist link: ' . spotify_playlist_uri ( $playlist ) . "\n";
+
+	$err = spotify_playlist_rename($playlist, 'Test 2');
+	if (!$err) {
+		die_error('spotify_playlist_create');
+	}
+	
+	echo 'Playlist new name: ' . spotify_playlist_name( $playlist ) . "\n";
+	echo 'Playlist link: '     . spotify_playlist_uri ( $playlist ) . "\n";
+
+	// Now add some tracks
+	$tracks = array(
+		'spotify:track:4juq76lIar8YWOLpYMXUAG',
+		'spotify:track:77J6Ag9kIvxtmPbBt0lFA6',
+		'spotify:track:2ihThLuhMTgKnd6yJIj9EW',
+		'spotify:track:7q4VZui4uWSHjwdP00SYdg',
+		'spotify:track:2yG5Oe2UNDD53cwSicIVGJ'
+	);
+
+	$err = spotify_playlist_add_tracks($playlist, $tracks);
+	if (!$err) {
+		die_error('spotify_playlist_add_tracks');
+	}
 
 	spotify_session_logout($session);
 ?>

@@ -33,27 +33,52 @@ extern zend_module_entry spotify_module_entry;
 # include "TSRM.h"
 #endif
 
+// The number of seconds to wait for pending events
+// such as login, or commits to playlist changes
+#define SPOTIFY_TIMEOUT 10
+
+#define PHP_SPOTIFY_SESSION_RES_NAME "Spotify Session"
 typedef struct _php_spotify_session {
 	sp_session *session;    // Spotify session
 	sp_error last_error;    // The last error that has occured (used for handing back to main thread)
 
-	pthread_mutex_t mutex;  // Mutex to lock on when blocking
+	pthread_mutex_t mutex;  // Mutex to lock on when blocking and used to make libspotify threadsafe
 	pthread_cond_t  cv;     // Conditional var for blocking
 
 	int events;             // The number of process events waiting
-	int waiting_login;      // The number of login callbacks we are waiting for
+	int waiting_login;      // The number of waiters on the login callback
+	int waiting_logout;     // The number of waiters on the logout callback
 } php_spotify_session;
 
-#define PHP_SPOTIFY_SESSION_RES_NAME "Spotify Session"
+#define PHP_SPOTIFY_PLAYLIST_RES_NAME "Spotify Playlist"
+typedef struct _php_spotify_playlist {
+	php_spotify_session *session;  // Parent session
+	sp_playlist *playlist;         // Spotify playlist
+
+	// In future we could use mutex per playlist
+	// That would reduce surpoius wakeups, but would make threading more complex
+	// as libspoity only allows one thread using its API at a time.
+	//pthread_mutex_t mutex;         // Mutex to lock on when blocking
+	//pthread_cond_t  cv;            // Conditional var for blocking
+} php_spotify_playlist;
 
 extern int le_spotify_session;
+extern int le_spotify_playlist;
 
+
+// Some common functions
+void check_process_events(php_spotify_session *session);
+void wakeup_thread_lock(php_spotify_session *session);
+void wakeup_thread(php_spotify_session *session);
+
+// The module functions
 PHP_MINIT_FUNCTION(spotify);
 PHP_RINIT_FUNCTION(spotify);
 PHP_MSHUTDOWN_FUNCTION(spotify);
 PHP_RSHUTDOWN_FUNCTION(spotify);
 PHP_MINFO_FUNCTION(spotify);
 
+// The PHP functions
 PHP_FUNCTION(spotify_session_login);
 PHP_FUNCTION(spotify_session_logout);
 PHP_FUNCTION(spotify_session_connectionstate);

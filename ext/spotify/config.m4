@@ -41,5 +41,5 @@ if test "$PHP_SPOTIFY" != "no"; then
 
   PHP_SUBST(SPOTIFY_SHARED_LIBADD)
 
-  PHP_NEW_EXTENSION(spotify, spotify.c spotify_error.c spotify_playlist.c spotify_session.c, $ext_shared)
+  PHP_NEW_EXTENSION(spotify, spotify.c spotify_common.c spotify_error.c spotify_playlist.c spotify_session.c, $ext_shared)
 fi

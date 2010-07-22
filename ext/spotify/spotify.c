@@ -1,10 +1,12 @@
 /**
  * A PHP extension to wrap some of libspotify
+ * Copyright 2010
  * By Andrew Brampton <me@bramp.net> 2010
  *    for outsideline.co.uk
  *
  * TODOs:
  *  Add ARG_INFO infomation, so reflexition works with the extension
+ *  Check ZEND_FETCH_RESOURCE actually returns if the wrong resource is given
  */
 
 #ifdef HAVE_CONFIG_H
@@ -20,6 +22,7 @@
 ZEND_DECLARE_MODULE_GLOBALS(spotify)
 
 int le_spotify_session;
+int le_spotify_playlist;
 
 /* {{{ spotify_functions[]
  *
@@ -99,7 +102,8 @@ PHP_MINIT_FUNCTION(spotify)
 	REGISTER_LONG_CONSTANT("SPOTIFY_ERROR_OTHER_TRANSIENT",    SP_ERROR_OTHER_TRANSIENT,    CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SPOTIFY_ERROR_IS_LOADING",         SP_ERROR_IS_LOADING,         CONST_CS | CONST_PERSISTENT);
 
-	le_spotify_session = zend_register_list_destructors_ex(NULL, NULL, PHP_SPOTIFY_SESSION_RES_NAME, module_number);
+	le_spotify_session  = zend_register_list_destructors_ex(NULL, NULL, PHP_SPOTIFY_SESSION_RES_NAME,  module_number);
+	le_spotify_playlist = zend_register_list_destructors_ex(NULL, NULL, PHP_SPOTIFY_PLAYLIST_RES_NAME, module_number);
 
 	return SUCCESS;
 }
