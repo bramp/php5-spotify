@@ -100,26 +100,26 @@ int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 	assert(playlist != NULL);
 	session = playlist->session;
 
-	DEBUG_PRINT("wait_for_playlist_pending_changes start\n");
+	DEBUG_PRINT("wait_for_playlist_loaded start\n");
 
 	// Block for a max of 10 seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 
 	while(err == 0) {
-		DEBUG_PRINT("wait_for_playlist_pending_changes loop\n");
+		DEBUG_PRINT("wait_for_playlist_loaded loop\n");
 
 		// We first check if we need to process any events
 		check_process_events(session);
 
-		if (!sp_playlist_is_loaded(playlist->playlist))
+		if (sp_playlist_is_loaded(playlist->playlist))
 			break;
 
 		// Wait until a callback is fired
 		err = pthread_cond_timedwait(&session->cv, &session->mutex, &ts);
 	}
 
-	DEBUG_PRINT("wait_for_playlist_pending_changes end(%d)\n", err);
+	DEBUG_PRINT("wait_for_playlist_loaded end(%d)\n", err);
 	return err;
 }
 
@@ -133,32 +133,13 @@ php_spotify_playlist * playlist_resource_create(php_spotify_session *session, sp
 	resource->session  = session;
 	resource->playlist = playlist;
 
-	/*
-	if ( err = pthread_mutex_init(&resource->mutex, NULL) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init failed!");
-
-		efree(resource);
-		return NULL;
-	}
-
-	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
-
-		pthread_mutex_destroy(&resource->mutex);
-
-		efree(resource);
-		return NULL;
-	}
-	*/
+	sp_playlist_add_callbacks(playlist, &callbacks, resource);
 
 	return resource;
 }
 
 void playlist_resource_destory(php_spotify_session *resource) {
 	assert(resource != NULL);
-
-	pthread_mutex_destroy(&resource->mutex);
-	pthread_cond_destroy (&resource->cv);
 
 	efree(resource);
 }
