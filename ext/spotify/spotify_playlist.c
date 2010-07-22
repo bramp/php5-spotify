@@ -138,7 +138,7 @@ static php_spotify_playlist * playlist_resource_create(php_spotify_session *sess
 	return resource;
 }
 
-static void playlist_resource_destory(php_spotify_session *resource) {
+static void playlist_resource_destory(php_spotify_playlist *resource) {
 	assert(resource != NULL);
 
 	efree(resource);
