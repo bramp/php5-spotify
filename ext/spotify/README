@@ -1,44 +1,10 @@
-Spec
-	// we need to get a session contexty object to be able to do write actions etc
-	// Returns a session resource
-	$sess = get_session($username, $password, $api_key);
-		Uses sp_session_init(), sp_session_login()
-		As there is a one session per process limit. This will actually create an
-		persistant resource. The resource will be freed when its reference count
-		is zero. If a different username/password is specified and the resource already
-		exists a error is produced.
-
-	// you need to create a ‘playlist container’ as well, but probably
-	// better to hide that aspect in the C for simplicity in PHP
-	// Returns a playlist resource
-	$playlist = create_playlist($sess, String $name);
-		Uses sp_session_playlistcontainer(), sp_playlistcontainer_add_new_playlist()
-
-	// rename the playlist
-	rename_playlist(&$playlist, String $name);
-		Uses sp_playlist_rename()
-
-	// add tracks to the playlist - we're expecting that the tracks array is a one dimensional list of
-	// spotify track URIs
-	playlist_add_tracks($playlist, Array $tracks);
-		Use sp_playlist_add_tracks(), sp_link_create_from_string(), sp_link_as_track()
-		Should the same track be allowed twice?
-
-	// get the playlist URI
-	$uri = playlist_uri(&$playlist);
-		Use sp_link_create_from_playlist(), sp_link_as_string(), sp_link_release()
-
-
-Extra non-spec functions
-	playlist_name()
-	last_error()
-
-
 Build Instructions
 
-	First instlal libspotify following their instructions
+	First install libspotify following their instructions
 
-	Then to build this library. In ext/spotify
+	Then to build this library. In ext/spotify execute:
 		phpize
 		./configure --enable-spotify
 		make
+
+There is additional documentation in the doc.html
