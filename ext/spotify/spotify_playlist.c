@@ -11,19 +11,19 @@
 #include "php.h"
 #include "php_spotify.h"
 
-void tracks_added(sp_playlist *pl, sp_track *const *tracks, int num_tracks, int position, void *userdata) {
+static void tracks_added(sp_playlist *pl, sp_track *const *tracks, int num_tracks, int position, void *userdata) {
 	DEBUG_PRINT("tracks_added\n");
 }
-void tracks_removed(sp_playlist *pl, const int *tracks, int num_tracks, void *userdata) {
+static void tracks_removed(sp_playlist *pl, const int *tracks, int num_tracks, void *userdata) {
 	DEBUG_PRINT("tracks_removed\n");
 }
-void tracks_moved(sp_playlist *pl, const int *tracks, int num_tracks, int new_position, void *userdata) {
+static void tracks_moved(sp_playlist *pl, const int *tracks, int num_tracks, int new_position, void *userdata) {
 	DEBUG_PRINT("tracks_moved\n");
 }
-void playlist_renamed(sp_playlist *pl, void *userdata) {
+static void playlist_renamed(sp_playlist *pl, void *userdata) {
 	DEBUG_PRINT("playlist_renamed\n");
 }
-void playlist_state_changed(sp_playlist *pl, void *userdata) {
+static void playlist_state_changed(sp_playlist *pl, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
@@ -31,7 +31,7 @@ void playlist_state_changed(sp_playlist *pl, void *userdata) {
 
 	wakeup_thread(playlist->session);
 }
-void playlist_update_in_progress(sp_playlist *pl, bool done, void *userdata) {
+static void playlist_update_in_progress(sp_playlist *pl, bool done, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
@@ -40,7 +40,7 @@ void playlist_update_in_progress(sp_playlist *pl, bool done, void *userdata) {
 	if (done)
 		wakeup_thread(playlist->session);
 }
-void playlist_metadata_updated(sp_playlist *pl, void *userdata) {
+static void playlist_metadata_updated(sp_playlist *pl, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
@@ -60,7 +60,7 @@ static sp_playlist_callbacks callbacks = {
 };
 
 // session->mutex must be locked
-int wait_for_playlist_pending_changes(php_spotify_playlist *playlist) {
+static int wait_for_playlist_pending_changes(php_spotify_playlist *playlist) {
 	struct timespec ts;
 	int err = 0;
 	php_spotify_session *session;
@@ -92,7 +92,7 @@ int wait_for_playlist_pending_changes(php_spotify_playlist *playlist) {
 }
 
 // session->mutex must be locked
-int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
+static int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 	struct timespec ts;
 	int err = 0;
 	php_spotify_session *session;
@@ -125,7 +125,7 @@ int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 
 
 // Creates a playlist resource object
-php_spotify_playlist * playlist_resource_create(php_spotify_session *session, sp_playlist *playlist) {
+static php_spotify_playlist * playlist_resource_create(php_spotify_session *session, sp_playlist *playlist) {
 
 	int err;
 	php_spotify_playlist * resource = emalloc(sizeof(php_spotify_playlist));
@@ -138,10 +138,19 @@ php_spotify_playlist * playlist_resource_create(php_spotify_session *session, sp
 	return resource;
 }
 
-void playlist_resource_destory(php_spotify_session *resource) {
+static void playlist_resource_destory(php_spotify_session *resource) {
 	assert(resource != NULL);
 
 	efree(resource);
+}
+
+void php_spotify_playlist_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
+{
+    php_spotify_playlist *playlist = (php_spotify_playlist*)rsrc->ptr;
+
+    if (playlist) {
+        playlist_resource_destory(playlist);
+    }
 }
 
 /* {{{ proto resource spotify_playlist_create(resource session, string name)

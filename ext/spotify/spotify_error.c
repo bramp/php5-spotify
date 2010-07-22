@@ -41,7 +41,7 @@ PHP_FUNCTION(spotify_last_error) {
 }
 /* }}} */
 
-/* {{{ proto string spotify_session_login(int error)
+/* {{{ proto string spotify_error_message(int error)
    Returns a text string for the error code */
 PHP_FUNCTION(spotify_error_message) {
 	long error;

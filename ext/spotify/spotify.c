@@ -7,6 +7,7 @@
  * TODOs:
  *  Add ARG_INFO infomation, so reflexition works with the extension
  *  Check ZEND_FETCH_RESOURCE actually returns if the wrong resource is given
+ *
  */
 
 #ifdef HAVE_CONFIG_H
@@ -25,8 +26,6 @@ int le_spotify_session;
 int le_spotify_playlist;
 
 /* {{{ spotify_functions[]
- *
- * Every user visible function must have an entry in spotify_functions[].
  */
 const zend_function_entry spotify_functions[] = {
 	PHP_FE(spotify_session_login,  NULL)
@@ -102,8 +101,11 @@ PHP_MINIT_FUNCTION(spotify)
 	REGISTER_LONG_CONSTANT("SPOTIFY_ERROR_OTHER_TRANSIENT",    SP_ERROR_OTHER_TRANSIENT,    CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SPOTIFY_ERROR_IS_LOADING",         SP_ERROR_IS_LOADING,         CONST_CS | CONST_PERSISTENT);
 
-	le_spotify_session  = zend_register_list_destructors_ex(NULL, NULL, PHP_SPOTIFY_SESSION_RES_NAME,  module_number);
-	le_spotify_playlist = zend_register_list_destructors_ex(NULL, NULL, PHP_SPOTIFY_PLAYLIST_RES_NAME, module_number);
+	le_spotify_session  = zend_register_list_destructors_ex(
+			NULL, php_spotify_session_p_dtor, PHP_SPOTIFY_SESSION_RES_NAME,  module_number);
+
+	le_spotify_playlist = zend_register_list_destructors_ex(
+			php_spotify_playlist_dtor, NULL, PHP_SPOTIFY_PLAYLIST_RES_NAME, module_number);
 
 	return SUCCESS;
 }

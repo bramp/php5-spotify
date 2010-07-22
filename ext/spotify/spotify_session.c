@@ -177,13 +177,14 @@ static sp_session_callbacks callbacks = {
 };
 
 // Creates a session resource object
-php_spotify_session * session_resource_create() {
+static php_spotify_session * session_resource_create(char *user) {
 
 	int err;
 	pthread_mutexattr_t attr;
-	php_spotify_session * resource = emalloc(sizeof(php_spotify_session));
+	php_spotify_session * resource = pemalloc(sizeof(php_spotify_session), 1);
 
 	resource->session       = NULL;
+	resource->user          = pestrdup(user, 1);
 	resource->events        = 0;
 	resource->waiting_login = 0;
 
@@ -196,44 +197,105 @@ php_spotify_session * session_resource_create() {
 
 	if ( err ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init failed!");
-		efree(resource);
-		return NULL;
+		goto error;
 	}
 
 	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
 
 		pthread_mutex_destroy(&resource->mutex);
-
-		efree(resource);
-		return NULL;
+		goto error;
 	}
 
 	return resource;
+
+error:
+	pefree(resource, 1);
+	return NULL;
 }
 
-void session_resource_destory(php_spotify_session *resource) {
+static void session_resource_destory(php_spotify_session *resource) {
 	assert(resource != NULL);
 
 	pthread_mutex_destroy(&resource->mutex);
 	pthread_cond_destroy (&resource->cv);
 
-	efree(resource);
+	pefree(resource->user, 1);
+	pefree(resource, 1);
 }
 
-int create_dir(const char *path) {
+void php_spotify_session_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
+{
+	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
+
+    if (session) {
+    	// Use reference counting and free the session
+    	//zend_hash_add(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, &new_le, sizeof(list_entry), NULL);
+    }
+}
+
+void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
+{
+	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
+
+    if (session) {
+    	//TODO Logout
+    	//TODO wait_For_logout
+    	session_resource_destory(session);
+    }
+}
+
+/* {{{ My own mkdir that checks if the dir exists and is a dir
+ * Returns 0 on success, non-zero otherwise.
+ */
+static int _mkdir(const char *dir, mode_t mode) {
 	struct stat st;
 
-	if (stat(path, &st)) {
+	// First check if it already exists
+	if (stat(dir, &st)) {
 		// If the path doesn't exist, lets try and make it
 		if (errno == ENOENT) {
-			return mkdir(path, 0755);
+			if ( mkdir(dir, mode) )
+				return -1;
 		}
-		return -1;
 	}
 
 	return !S_ISDIR(st.st_mode);
 }
+
+/* {{{ Recursively creates a directory */
+static int mkdir_recursive(const char *dir, mode_t mode) {
+	char *tmp, *p;
+	size_t len;
+	int err = -1;
+
+	// Copy dir so we can change it
+	tmp = estrdup(dir);
+	len = strlen(tmp);
+
+	// Trim trailing /
+	if(tmp[len - 1] == '/')
+		tmp[len - 1] = '\0';
+
+	// Loop finding each / and mkdir it
+	p = tmp;
+	while (p = strchr(p + 1, '/')) {
+		*p = '\0';
+		if (err = _mkdir(tmp, mode)) {
+			goto cleanup;
+		}
+		*p = '/';
+	}
+
+	// Now try and make the full path
+	err = _mkdir(tmp, mode);
+
+cleanup:
+	efree(tmp);
+	return err;
+}
+/* }}} */
+
 
 /* {{{ proto resource spotify_session_login(string username, string password, string appkey)
    Logs into spotify and returns a session resource on success
@@ -241,11 +303,11 @@ int create_dir(const char *path) {
 */
 PHP_FUNCTION(spotify_session_login) {
 	sp_session_config config;
-
 	sp_error error;
 
 	php_spotify_session *resource;
 	int err;
+	list_entry *le, new_le;
 
 	char * cache_location;
 	char * settings_location;
@@ -265,6 +327,17 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
+	// Check if we already have a session
+	if (zend_hash_find(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, (void **)&le) == SUCCESS) {
+		resource = le->ptr;
+		if (strcmp(resource->user, user) != 0){
+			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", user);
+			RETURN_FALSE;
+		}
+		ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
+		return;
+	}
+
 	if (pass_len < 1) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "A blank password was given");
 		RETURN_FALSE;
@@ -279,17 +352,17 @@ PHP_FUNCTION(spotify_session_login) {
 	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
 
 	// A bug in libspotify means we should create the directories
-	if ( create_dir(cache_location) ) {
+	if ( mkdir_recursive(cache_location, S_IRWXU) ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create cache directory \"%s\"", cache_location);
 		RETURN_FALSE;
 	}
 
-	if ( create_dir(settings_location) ) {
+	if ( mkdir_recursive(settings_location, S_IRWXU) ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create settings directory \"%s\"", settings_location);
 		RETURN_FALSE;
 	}
 
-	resource = session_resource_create();
+	resource = session_resource_create(user);
 	if (resource == NULL) {
 		// A error message will be printed in session_resource_create()
 		RETURN_FALSE;
@@ -344,6 +417,12 @@ PHP_FUNCTION(spotify_session_login) {
 	pthread_mutex_unlock(&resource->mutex);
 
 	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
+
+	/* Store a reference in the persistence list */
+	new_le.ptr  = resource;
+	new_le.type = le_spotify_session;
+	zend_hash_add(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, &new_le, sizeof(list_entry), NULL);
+
 	return;
 
 error:
@@ -384,6 +463,9 @@ PHP_FUNCTION(spotify_session_logout) {
 	wait_for_logged_out(session);
 
 	pthread_mutex_unlock(&session->mutex);
+
+	// Now invalidate the resource
+	zend_list_delete(Z_LVAL_P(zsession));
 
 	// TODO In the future libspotify will add sp_session_release. Call that here.
 

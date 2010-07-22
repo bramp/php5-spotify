@@ -42,6 +42,8 @@ typedef struct _php_spotify_session {
 	sp_session *session;    // Spotify session
 	sp_error last_error;    // The last error that has occured (used for handing back to main thread)
 
+	char *user;             // The username this session is for
+
 	pthread_mutex_t mutex;  // Mutex to lock on when blocking and used to make libspotify threadsafe
 	pthread_cond_t  cv;     // Conditional var for blocking
 
@@ -65,6 +67,10 @@ typedef struct _php_spotify_playlist {
 extern int le_spotify_session;
 extern int le_spotify_playlist;
 
+// Some dtors
+void php_spotify_session_dtor  (zend_rsrc_list_entry *rsrc TSRMLS_DC);
+void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC);
+void php_spotify_playlist_dtor (zend_rsrc_list_entry *rsrc TSRMLS_DC);
 
 // Some common functions
 void check_process_events(php_spotify_session *session);
