@@ -17,7 +17,7 @@
 // This must be called with session->mutex held
 void check_process_events(php_spotify_session *session) {
 	assert(session != NULL);
-	DEBUG_PRINT("check_process_events (%d)\n", session->events);
+	//DEBUG_PRINT("check_process_events (%d)\n", session->events);
 
 	while (session->events > 0) {
 		int timeout = -1;
@@ -31,13 +31,13 @@ void check_process_events(php_spotify_session *session) {
 		session->events--;
 	}
 
-	DEBUG_PRINT("check_process_events end\n");
+	//DEBUG_PRINT("check_process_events end\n");
 }
 
 // Must be called with session->mutex held
 void wakeup_thread_lock(php_spotify_session *session) {
 	assert(session != NULL);
-	DEBUG_PRINT("wakeup_thread_lock\n");
+	//DEBUG_PRINT("wakeup_thread_lock\n");
 	pthread_cond_broadcast(&session->cv);
 }
 
@@ -45,7 +45,7 @@ void wakeup_thread_lock(php_spotify_session *session) {
 void wakeup_thread(php_spotify_session *session) {
 	assert(session != NULL);
 
-	DEBUG_PRINT("wakeup_thread\n");
+	//DEBUG_PRINT("wakeup_thread\n");
 
 	pthread_mutex_lock   (&session->mutex);
 	wakeup_thread_lock   (session);

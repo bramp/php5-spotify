@@ -29,7 +29,7 @@ int wait_for_logged_in(php_spotify_session *session) {
 
 	session->waiting_login++;
 
-	DEBUG_PRINT("wait_for_logged_in (%d)\n", session->waiting_login);
+	//DEBUG_PRINT("wait_for_logged_in (%d)\n", session->waiting_login);
 
 	// Block for a max of 5 seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
@@ -58,7 +58,7 @@ int wait_for_logged_out(php_spotify_session *session) {
 
 	assert(session != NULL);
 
-	DEBUG_PRINT("wait_for_logged_out\n");
+	//DEBUG_PRINT("wait_for_logged_out\n");
 
 	// Block for a max of 5 seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
@@ -86,7 +86,7 @@ static void logged_in (sp_session *session, sp_error error) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("logged_in (%d)\n", error);
+	//DEBUG_PRINT("logged_in (%d)\n", error);
 
 	pthread_mutex_lock   (&resource->mutex);
 
@@ -104,7 +104,7 @@ static void logged_out (sp_session *session) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("logged_out\n");
+	//DEBUG_PRINT("logged_out\n");
 
 	pthread_mutex_lock   (&resource->mutex);
 
@@ -119,25 +119,25 @@ static void metadata_updated (sp_session *session) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("metadata_updated\n");
+	//DEBUG_PRINT("metadata_updated\n");
 
 	// Broadcast that we have some extra metadata
 	wakeup_thread(resource);
 }
 
 static void connection_error (sp_session *session, sp_error error) {
-	DEBUG_PRINT("connection_error\n");
+	//DEBUG_PRINT("connection_error\n");
 }
 
 static void message_to_user (sp_session *session, const char *message) {
-	DEBUG_PRINT("message_to_user: %s", message);
+	//DEBUG_PRINT("message_to_user: %s", message);
 }
 
 static void notify_main_thread (sp_session *session) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("notify_main_thread\n");
+	//DEBUG_PRINT("notify_main_thread\n");
 
 	// Signal that an event is queued and needs to be run on the main thread
 	pthread_mutex_lock(&resource->mutex);
@@ -151,7 +151,7 @@ static void notify_main_thread (sp_session *session) {
 }
 
 static void log_message (sp_session *session, const char *data) {
-	DEBUG_PRINT("log_message: %s", data);
+	//DEBUG_PRINT("log_message: %s", data);
 }
 
 // Some callbacks we are not interested in, but written down for future's sake
@@ -181,8 +181,11 @@ static php_spotify_session * session_resource_create(char *user) {
 
 	int err;
 	pthread_mutexattr_t attr;
-	php_spotify_session * resource = pemalloc(sizeof(php_spotify_session), 1);
+	php_spotify_session * resource;
 
+	DEBUG_PRINT("session_resource_create\n");
+
+	resource = pemalloc(sizeof(php_spotify_session), 1);
 	resource->session       = NULL;
 	resource->user          = pestrdup(user, 1);
 	resource->events        = 0;
@@ -216,6 +219,8 @@ error:
 
 static void session_resource_destory(php_spotify_session *resource) {
 	assert(resource != NULL);
+
+	DEBUG_PRINT("session_resource_destory\n");
 
 	pthread_mutex_destroy(&resource->mutex);
 	pthread_cond_destroy (&resource->cv);
