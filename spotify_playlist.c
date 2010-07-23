@@ -127,7 +127,6 @@ static int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 // Creates a playlist resource object
 static php_spotify_playlist * playlist_resource_create(php_spotify_session *session, sp_playlist *playlist) {
 
-	int err;
 	php_spotify_playlist * resource = emalloc(sizeof(php_spotify_playlist));
 
 	resource->session  = session;

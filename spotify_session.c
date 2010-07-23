@@ -203,7 +203,8 @@ static php_spotify_session * session_resource_create(char *user) {
 		goto error;
 	}
 
-	if ( err = pthread_cond_init (&resource->cv, NULL) ) {
+	err = pthread_cond_init (&resource->cv, NULL);
+	if ( err ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init failed!");
 
 		pthread_mutex_destroy(&resource->mutex);
@@ -284,9 +285,10 @@ static int mkdir_recursive(const char *dir, mode_t mode) {
 
 	// Loop finding each / and mkdir it
 	p = tmp;
-	while (p = strchr(p + 1, '/')) {
+	while ((p = strchr(p + 1, '/'))) {
 		*p = '\0';
-		if (err = _mkdir(tmp, mode)) {
+		err = _mkdir(tmp, mode);
+		if (err) {
 			goto cleanup;
 		}
 		*p = '/';

@@ -24,7 +24,7 @@ extern zend_module_entry spotify_module_entry;
 #define DEBUG_SPOTIFY
 
 #ifdef DEBUG_SPOTIFY
-# define DEBUG_PRINT(f, s...) php_printf("%X ", pthread_self()); php_printf(f, ## s)
+# define DEBUG_PRINT(f, s...) php_printf("%X ", (unsigned int)pthread_self()); php_printf(f, ## s)
 #else
 # define DEBUG_PRINT(f)
 #endif
