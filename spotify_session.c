@@ -353,11 +353,12 @@ PHP_FUNCTION(spotify_session_login) {
 	if (zend_hash_find(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, (void **)&le) == SUCCESS) {
 		resource = le->ptr;
 		if (strcmp(resource->user, user) != 0){
-			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", user);
+			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", resource->user);
 			RETURN_FALSE;
 		}
-		ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
-		return;
+		// Now jump down and ensure we have logged in, etc
+		pthread_mutex_lock(&resource->mutex);
+		goto login;
 	}
 
 	if (pass_len < 1) {
@@ -416,6 +417,8 @@ PHP_FUNCTION(spotify_session_login) {
 		SPOTIFY_G(last_error) = error;
 		goto error;
 	}
+
+login:
 
 	// Now try and log in
 	error = sp_session_login(resource->session, user, pass);
