@@ -76,6 +76,7 @@ void php_spotify_playlist_dtor (zend_rsrc_list_entry *rsrc TSRMLS_DC);
 void check_process_events(php_spotify_session *session);
 void wakeup_thread_lock(php_spotify_session *session);
 void wakeup_thread(php_spotify_session *session);
+int check_logged_in(php_spotify_session *session);
 
 // The module functions
 PHP_MINIT_FUNCTION(spotify);

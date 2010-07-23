@@ -27,6 +27,10 @@ int wait_for_logged_in(php_spotify_session *session) {
 
 	assert(session != NULL);
 
+	// Don't bother logging in if we already are
+	if (check_logged_in(session))
+		return 0;
+
 	session->waiting_login++;
 
 	//DEBUG_PRINT("wait_for_logged_in (%d)\n", session->waiting_login);

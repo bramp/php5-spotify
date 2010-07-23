@@ -51,3 +51,14 @@ void wakeup_thread(php_spotify_session *session) {
 	wakeup_thread_lock   (session);
 	pthread_mutex_unlock (&session->mutex);
 }
+
+// Returns 1 if logged in, 0 otherwise
+// This is needed as libspotify will segfault in places if we are no longer logged in!
+// Must be called with mutex held
+int check_logged_in(php_spotify_session *session) {
+	sp_connectionstate  state = sp_session_connectionstate(session->session);
+	if (state == SP_CONNECTION_STATE_LOGGED_IN) {
+		return 1;
+	}
+	return 0;
+}

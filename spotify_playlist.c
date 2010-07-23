@@ -178,6 +178,10 @@ PHP_FUNCTION(spotify_playlist_create) {
 	}
 
 	pthread_mutex_lock(&session->mutex);
+	if (!check_logged_in(session)) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		goto error;
+	}
 
     // Always check if some events need processing
     check_process_events(session);
@@ -232,6 +236,12 @@ PHP_FUNCTION(spotify_playlist_name) {
     session = playlist->session;
     pthread_mutex_lock(&session->mutex);
 
+    if (!check_logged_in(session)) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		pthread_mutex_unlock(&session->mutex);
+		RETURN_FALSE;
+	}
+
     // Always check if the playlist is loaded
     err = wait_for_playlist_loaded(playlist);
     if (err == ETIMEDOUT) {
@@ -274,6 +284,12 @@ PHP_FUNCTION(spotify_playlist_rename) {
 
     session = playlist->session;
     pthread_mutex_lock(&session->mutex);
+
+    if (!check_logged_in(session)) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		pthread_mutex_unlock(&session->mutex);
+		RETURN_FALSE;
+	}
 
     // Always check if some events need processing
     check_process_events(session);
@@ -325,6 +341,11 @@ PHP_FUNCTION(spotify_playlist_add_tracks) {
 
     session = playlist->session;
     pthread_mutex_lock(&session->mutex);
+
+    if (!check_logged_in(session)) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		goto cleanup;
+	}
 
     // Always check if some events need processing
     check_process_events(session);
