@@ -250,9 +250,19 @@ void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
 
     if (session) {
-    	//TODO Logout
-    	//TODO wait_For_logout
-    	session_resource_destory(session);
+        pthread_mutex_lock(&session->mutex);
+
+        // If we are logged in, log us out (and therefore save any remaining state).
+        if (check_logged_in(session)) {
+			sp_error error = sp_session_logout(session->session);
+			if (error == SP_ERROR_OK) {
+				wait_for_logged_out(session);
+			}
+        }
+
+        pthread_mutex_unlock(&session->mutex);
+
+        session_resource_destory(session);
     }
 }
 
