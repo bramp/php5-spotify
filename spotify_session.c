@@ -3,6 +3,7 @@
  * By Andrew Brampton <me@bramp.net> 2010
  *    for outsideline.co.uk
  */
+#define _GNU_SOURCE
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
