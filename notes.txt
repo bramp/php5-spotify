@@ -1,0 +1,9 @@
+./buildconf
+
+../../sapi/cli/php -c . test.php
+
+../../sapi/cli/php test.php
+
+~/valgrind/vg-in-place ../../sapi/cli/php -c . test.php
+
+~/valgrind/vg-in-place ../../sapi/cli/php test.php

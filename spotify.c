@@ -75,6 +75,7 @@ ZEND_GET_MODULE(spotify)
 // To ensure we don't create multiple session per process
 // with have one single global session.
 sp_session *    session;
+php_spotify_session * session_resource;
 pthread_t       session_thread;
 pthread_mutex_t session_mutex; // Used to ensure the API is only called from one thread at a time
                                // Also used to protect the variables in the session resource.
@@ -90,13 +91,13 @@ pthread_cond_t  request_cv;     // Conditional var for blocking for a callback
 // This basicaly loops waiting for notify_main_threads
 static void *session_main_thread(void *data) {
 
-	DEBUG_PRINT("session_main_thread\n");
+	//DEBUG_PRINT("session_main_thread\n");
 
 	pthread_mutex_lock(&session_mutex);
 
 wait_for_session:
 
-	DEBUG_PRINT("session_main_thread wait_for_session\n");
+	//DEBUG_PRINT("session_main_thread wait_for_session\n");
 
 	while(running) {
 
@@ -109,7 +110,7 @@ wait_for_session:
 
 	pthread_mutex_unlock(&session_mutex);
 
-	DEBUG_PRINT("session_main_thread main\n");
+	//DEBUG_PRINT("session_main_thread main\n");
 
 	while(running) {
 		int timeout = -1; // TODO use the timeout
@@ -136,17 +137,17 @@ wait_for_session:
 }
 
 void request_lock() {
-	DEBUG_PRINT("request_lock\n");
+	//DEBUG_PRINT("request_lock\n");
 	pthread_mutex_lock ( &request_mutex );
 }
 
 void request_unlock() {
-	DEBUG_PRINT("request_unlock\n");
+	//DEBUG_PRINT("request_unlock\n");
 	pthread_mutex_unlock ( &request_mutex );
 }
 
 void request_wake_lock() {
-	DEBUG_PRINT("request_wake_lock\n");
+	//DEBUG_PRINT("request_wake_lock\n");
 	pthread_cond_broadcast( &request_cv );
 }
 
@@ -203,6 +204,7 @@ int session_init() {
 	pthread_mutexattr_t attr;
 
 	session = NULL;
+	session_resource = NULL;
 	running = 1;
 
 	// I hate to do it, but the mutex must be recursive. That's because

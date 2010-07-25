@@ -52,8 +52,11 @@
 
 	//exit();
 
+	// Use the time as the playlist name (just for debuggin purposes)
+	$playlistName = date("H:i:s");
+
 	// Now create a playlist
-	$playlist = spotify_playlist_create($session, 'Test');
+	$playlist = spotify_playlist_create($session, $playlistName);
 	if (!$playlist) {
 		die_error('spotify_playlist_create');
 	}
@@ -62,7 +65,7 @@
 	echo 'Playlist name: ' . spotify_playlist_name( $playlist ) . "\n";
 	echo 'Playlist link: ' . spotify_playlist_uri ( $playlist ) . "\n";
 
-	$err = spotify_playlist_rename($playlist, 'Test 2');
+	$err = spotify_playlist_rename($playlist, $playlistName . '_after');
 	if (!$err) {
 		die_error('spotify_playlist_create');
 	}
@@ -71,7 +74,7 @@
 	echo 'Playlist link: '     . spotify_playlist_uri ( $playlist ) . "\n";
 
 	// Now add some tracks
-	$tracks = array(
+	$tracks = array (
 		'spotify:track:4juq76lIar8YWOLpYMXUAG',
 		'spotify:track:77J6Ag9kIvxtmPbBt0lFA6',
 		'spotify:track:2ihThLuhMTgKnd6yJIj9EW',
@@ -84,5 +87,10 @@
 		die_error('spotify_playlist_add_tracks');
 	}
 
-	//spotify_session_logout($session);
+	// I absolutely hate this BUT, if we don't sleep here the changes don't get sent back
+	// to the spotify server. Now I'm asking libspotify to tell me when the changes have
+	// been saved, and they should have been saved already, but obviously not. So to be
+	// save just sleep for 10 seconds.
+	sleep(10);
+
 ?>

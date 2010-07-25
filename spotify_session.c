@@ -224,7 +224,9 @@ static php_spotify_session * session_resource_create(char *user) {
 }
 
 static void session_resource_destory(php_spotify_session *resource) {
-	assert(resource != NULL);
+
+	if (resource == NULL)
+		return;
 
 	DEBUG_PRINT("session_resource_destory\n");
 
@@ -343,9 +345,10 @@ PHP_FUNCTION(spotify_session_login) {
 	sp_session_config config;
 	sp_error error;
 
-	php_spotify_session *resource;
+	php_spotify_session *resource = NULL;
 	int err;
-	list_entry *le, new_le;
+	//list_entry *le;
+	list_entry new_le;
 
 	char * cache_location;
 	char * settings_location;
@@ -366,15 +369,22 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	// Check if we already have a session
+	session_lock(resource); // This works because currently the session lock is global. Later it will be inside the resource struct
+	/*
 	if (zend_hash_find(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, (void **)&le) == SUCCESS) {
 		resource = le->ptr;
-		if (strcmp(resource->user, user) != 0){
+	*/
+	if (session_resource != NULL) {
+		resource = session_resource;
+		if (strcmp(resource->user, user) != 0) {
 			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", resource->user);
+			session_unlock(resource);
 			RETURN_FALSE;
 		}
 		// Now jump down and ensure we have logged in, etc
-		session_lock(resource);
-		goto login;
+		if (!session_logged_in(resource))
+			goto login;
+		goto done;
 	}
 
 	if (pass_len < 1) {
@@ -387,18 +397,23 @@ PHP_FUNCTION(spotify_session_login) {
 		RETURN_FALSE;
 	}
 
-	spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
-	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
+	// Use the username in the cache dir
+	//spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
+	//spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
+
+	// To be multiple process safe, use the PID
+	spprintf(&cache_location,    0, "/tmp/libspotify-php/%d/cache/",    getpid());
+	spprintf(&settings_location, 0, "/tmp/libspotify-php/%d/settings/", getpid());
 
 	// A bug in libspotify means we should create the directories
 	if ( mkdir_recursive(cache_location, S_IRWXU) ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create cache directory \"%s\"", cache_location);
-		RETURN_FALSE;
+		goto error;
 	}
 
 	if ( mkdir_recursive(settings_location, S_IRWXU) ) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create settings directory \"%s\"", settings_location);
-		RETURN_FALSE;
+		goto error;
 	}
 
 	resource = session_resource_create(user);
@@ -420,8 +435,6 @@ PHP_FUNCTION(spotify_session_login) {
 	// Pass the resource to libspotify as userdata
 	config.userdata = resource;
 
-	session_lock(resource);
-
 	// Create the session
 	error = sp_session_init(&config, &resource->session);
 
@@ -435,10 +448,12 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	// Set the global session and signal for the main_thread to start
-	session = resource->session;
+	session_resource = resource;
+	session          = resource->session;
 	pthread_cond_signal(&session_cv);
 
 login:
+	DEBUG_PRINT("sp_session_login\n");
 
 	// Now try and log in
 	error = sp_session_login(resource->session, user, pass);
@@ -457,8 +472,8 @@ login:
 
 	session_lock(resource);
 
-	sp_connectionstate state = sp_session_connectionstate(resource->session);
-	if (state != SP_CONNECTION_STATE_LOGGED_IN) {
+done:
+	if (!session_logged_in(resource)) {
 		SPOTIFY_G(last_error) = resource->last_error;
 		goto error;
 	}
