@@ -44,9 +44,6 @@ typedef struct _php_spotify_session {
 
 	char *user;             // The username this session is for
 
-	pthread_mutex_t mutex;  // Mutex to lock on when blocking and used to make libspotify threadsafe
-	pthread_cond_t  cv;     // Conditional var for blocking
-
 	int events;             // The number of process events waiting
 	int waiting_login;      // The number of waiters on the login callback
 	int waiting_logout;     // The number of waiters on the logout callback
@@ -56,12 +53,6 @@ typedef struct _php_spotify_session {
 typedef struct _php_spotify_playlist {
 	php_spotify_session *session;  // Parent session
 	sp_playlist *playlist;         // Spotify playlist
-
-	// In future we could use mutex per playlist
-	// That would reduce surpoius wakeups, but would make threading more complex
-	// as libspoity only allows one thread using its API at a time.
-	//pthread_mutex_t mutex;         // Mutex to lock on when blocking
-	//pthread_cond_t  cv;            // Conditional var for blocking
 } php_spotify_playlist;
 
 extern int le_spotify_session;
@@ -73,10 +64,34 @@ void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC);
 void php_spotify_playlist_dtor (zend_rsrc_list_entry *rsrc TSRMLS_DC);
 
 // Some common functions
-void check_process_events(php_spotify_session *session);
 void wakeup_thread_lock(php_spotify_session *session);
 void wakeup_thread(php_spotify_session *session);
-int check_logged_in(php_spotify_session *session);
+int session_logged_in(php_spotify_session *session);
+
+// Request locking functions
+// Used when the request has to wait for a libspotify callback.
+void request_lock();
+void request_unlock();
+//void request_wake_lock();
+void request_wake();
+int  request_sleep_lock(const struct timespec *restrict abstime);
+int  request_sleep(const struct timespec *restrict abstime);
+
+// Macros for locking - They are macros so the __FILE__ define works in a useful way.
+// Eventually use res->mutex, but at the moment just use the global session_mutex;
+#ifdef DEBUG_SPOTIFY
+# define session_lock(res)   pthread_mutex_lock  (&session_mutex); php_printf("%X LOCK %s:%d\n",   (unsigned int)pthread_self(),  __FILE__, __LINE__);
+# define session_unlock(res) pthread_mutex_unlock(&session_mutex); php_printf("%X UNLOCK %s:%d\n", (unsigned int)pthread_self(),  __FILE__, __LINE__);
+#else
+# define session_lock(res)   pthread_mutex_lock  (&session_mutex);
+# define session_unlock(res) pthread_mutex_unlock(&session_mutex);
+#endif
+
+// The global vars
+extern sp_session *    session;        // The single session
+extern pthread_t       session_thread; // The thread handling notifiy_main_thread events
+extern pthread_mutex_t session_mutex;  // This will move into the session resource
+extern pthread_cond_t  session_cv;     // But they ensure only one thread uses the session at a time.
 
 // The module functions
 PHP_MINIT_FUNCTION(spotify);
@@ -105,6 +120,7 @@ ZEND_BEGIN_MODULE_GLOBALS(spotify)
 ZEND_END_MODULE_GLOBALS(spotify)
 
 PHPAPI ZEND_EXTERN_MODULE_GLOBALS(spotify)
+
 
 #ifdef ZTS
 # define SPOTIFY_G(v) TSRMG(spotify_globals_id, zend_spotify_globals *, v)

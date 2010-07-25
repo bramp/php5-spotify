@@ -9,6 +9,7 @@
  *  Check ZEND_FETCH_RESOURCE actually returns if the wrong resource is given
  *
  */
+#define _GNU_SOURCE
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
@@ -71,10 +72,196 @@ zend_module_entry spotify_module_entry = {
 ZEND_GET_MODULE(spotify)
 #endif
 
+// To ensure we don't create multiple session per process
+// with have one single global session.
+sp_session *    session;
+pthread_t       session_thread;
+pthread_mutex_t session_mutex; // Used to ensure the API is only called from one thread at a time
+                               // Also used to protect the variables in the session resource.
+pthread_cond_t  session_cv;    // Used to wait for notify_main events
+volatile int running;
+
+// This are blocked on when waiting for a callback (such as login).
+// In future we could split these into multiple mutex/cv pairs, one for each type of
+// callback.
+pthread_mutex_t request_mutex;  // Mutex to lock on when waiting for a (libspotify) callback
+pthread_cond_t  request_cv;     // Conditional var for blocking for a callback
+
+// This basicaly loops waiting for notify_main_threads
+static void *session_main_thread(void *data) {
+
+	DEBUG_PRINT("session_main_thread\n");
+
+	pthread_mutex_lock(&session_mutex);
+
+wait_for_session:
+
+	DEBUG_PRINT("session_main_thread wait_for_session\n");
+
+	while(running) {
+
+		// Wait until a callback is fired
+		pthread_cond_wait(&session_cv, &session_mutex);
+
+		if (session) // Break when the session is good
+			break;
+	}
+
+	pthread_mutex_unlock(&session_mutex);
+
+	DEBUG_PRINT("session_main_thread main\n");
+
+	while(running) {
+		int timeout = -1; // TODO use the timeout
+
+		sp_session_process_events(session, &timeout);
+
+		// Wait until a callback is fired
+		pthread_mutex_lock(&session_mutex);
+		pthread_cond_wait(&session_cv, &session_mutex);
+
+		DEBUG_PRINT("session_main_thread wakeup\n");
+
+		// Check if the session has been killed
+		if (session == NULL)
+			// Not very elegant, goto, but it is neat
+			goto wait_for_session;
+
+		pthread_mutex_unlock(&session_mutex);
+	}
+
+	DEBUG_PRINT("session_main_thread end\n");
+
+	pthread_exit(NULL);
+}
+
+void request_lock() {
+	DEBUG_PRINT("request_lock\n");
+	pthread_mutex_lock ( &request_mutex );
+}
+
+void request_unlock() {
+	DEBUG_PRINT("request_unlock\n");
+	pthread_mutex_unlock ( &request_mutex );
+}
+
+void request_wake_lock() {
+	DEBUG_PRINT("request_wake_lock\n");
+	pthread_cond_broadcast( &request_cv );
+}
+
+void request_wake() {
+	request_lock();
+	request_wake_lock();
+	request_unlock();
+}
+
+// Must be called with request_lock() held
+int request_sleep_lock(const struct timespec *restrict abstime) {
+	if (abstime)
+		return pthread_cond_timedwait(&request_cv, &request_mutex, abstime);
+	return pthread_cond_wait(&request_cv, &request_mutex);
+}
+
+int request_sleep(const struct timespec *restrict abstime) {
+	int ret;
+	request_lock();
+	ret = request_sleep_lock(abstime);
+	request_unlock();
+	return ret;
+}
+
+int request_init() {
+	int err;
+
+	err = pthread_mutex_init(&request_mutex, NULL);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init() failed!");
+		return FAILURE;
+	}
+
+	err = pthread_cond_init (&request_cv, NULL);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init() failed!");
+
+		pthread_mutex_destroy(&request_mutex);
+		return FAILURE;
+	}
+
+	return SUCCESS;
+}
+
+void request_shutdown() {
+	DEBUG_PRINT("request_shutdown\n");
+
+	pthread_mutex_destroy(&request_mutex);
+	pthread_cond_destroy (&request_cv);
+}
+
+int session_init() {
+	int err;
+	pthread_mutexattr_t attr;
+
+	session = NULL;
+	running = 1;
+
+	// I hate to do it, but the mutex must be recursive. That's because
+	// libspotify sometimes calls the callbacks from the main thread (which causes a deadlock)
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+	err = pthread_mutex_init(&session_mutex, &attr);
+	pthread_mutexattr_destroy(&attr);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init() failed!");
+		return FAILURE;
+	}
+
+	err = pthread_cond_init (&session_cv, NULL);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init() failed!");
+
+		pthread_mutex_destroy(&session_mutex);
+		return FAILURE;
+	}
+
+	// Create a single "main" thread, used to handle sp_session_process_events()
+	err = pthread_create(&session_thread, NULL, session_main_thread, NULL);
+    if (err){
+    	php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_create() failed!");
+    	pthread_mutex_destroy(&session_mutex);
+    	pthread_cond_destroy (&session_cv);
+    	return FAILURE;
+    }
+
+    return SUCCESS;
+}
+
+void session_shutdown() {
+	DEBUG_PRINT("session_shutdown\n");
+
+	running = 0;
+	pthread_cond_signal(&session_cv);
+	pthread_join(session_thread, NULL);
+
+	pthread_mutex_destroy(&session_mutex);
+	pthread_cond_destroy (&session_cv);
+}
+
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(spotify)
 {
+	DEBUG_PRINT("PHP_MINIT_FUNCTION\n");
+
+	if (session_init() == FAILURE) {
+		return FAILURE;
+	}
+
+    if (request_init() == FAILURE) {
+    	return FAILURE;
+    }
+
 	REGISTER_LONG_CONSTANT("SPOTIFY_CONNECTION_STATE_LOGGED_OUT",   SP_CONNECTION_STATE_LOGGED_OUT,   CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SPOTIFY_CONNECTION_STATE_LOGGED_IN",    SP_CONNECTION_STATE_LOGGED_IN,    CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("SPOTIFY_CONNECTION_STATE_DISCONNECTED", SP_CONNECTION_STATE_DISCONNECTED, CONST_CS | CONST_PERSISTENT);
@@ -115,6 +302,11 @@ PHP_MINIT_FUNCTION(spotify)
  */
 PHP_MSHUTDOWN_FUNCTION(spotify)
 {
+	DEBUG_PRINT("PHP_MSHUTDOWN_FUNCTION\n");
+
+	session_shutdown();
+	request_shutdown();
+
 	return SUCCESS;
 }
 /* }}} */
@@ -124,7 +316,12 @@ PHP_MSHUTDOWN_FUNCTION(spotify)
  */
 PHP_RINIT_FUNCTION(spotify)
 {
+	int err;
+
+	DEBUG_PRINT("PHP_RINIT_FUNCTION\n");
+
 	SPOTIFY_G(last_error) = SP_ERROR_OK;
+
 	return SUCCESS;
 }
 /* }}} */
@@ -134,6 +331,7 @@ PHP_RINIT_FUNCTION(spotify)
  */
 PHP_RSHUTDOWN_FUNCTION(spotify)
 {
+	DEBUG_PRINT("PHP_RSHUTDOWN_FUNCTION\n");
 	return SUCCESS;
 }
 /* }}} */

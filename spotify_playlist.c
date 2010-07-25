@@ -28,8 +28,7 @@ static void playlist_state_changed(sp_playlist *pl, void *userdata) {
 	assert(playlist != NULL);
 
 	//DEBUG_PRINT("playlist_state_changed\n");
-
-	wakeup_thread(playlist->session);
+	request_wake();
 }
 static void playlist_update_in_progress(sp_playlist *pl, bool done, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
@@ -38,7 +37,7 @@ static void playlist_update_in_progress(sp_playlist *pl, bool done, void *userda
 	//DEBUG_PRINT("playlist_update_in_progress (%d)\n", done);
 
 	if (done)
-		wakeup_thread(playlist->session);
+		request_wake();
 }
 static void playlist_metadata_updated(sp_playlist *pl, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
@@ -46,7 +45,7 @@ static void playlist_metadata_updated(sp_playlist *pl, void *userdata) {
 
 	//DEBUG_PRINT("playlist_metadata_updated\n");
 
-	wakeup_thread(playlist->session);
+	request_wake();
 }
 
 static sp_playlist_callbacks callbacks = {
@@ -68,26 +67,32 @@ static int wait_for_playlist_pending_changes(php_spotify_playlist *playlist) {
 	assert(playlist != NULL);
 	session = playlist->session;
 
-	//DEBUG_PRINT("wait_for_playlist_pending_changes start\n");
+	DEBUG_PRINT("wait_for_playlist_pending_changes\n");
 
 	// Block for a max of 10 seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 
+	request_lock();
+
 	while(err == 0) {
 		//DEBUG_PRINT("wait_for_playlist_pending_changes loop\n");
+		int pending_changes;
 
-		// We first check if we need to process any events
-		check_process_events(session);
+		session_lock(session);
+		pending_changes = sp_playlist_has_pending_changes(playlist->playlist);
+		session_unlock(session);
 
-		if (!sp_playlist_has_pending_changes(playlist->playlist))
+		if (!pending_changes)
 			break;
 
 		// Wait until a callback is fired
-		err = pthread_cond_timedwait(&session->cv, &session->mutex, &ts);
+		err = request_sleep_lock(&ts);
 	}
 
-	//DEBUG_PRINT("wait_for_playlist_pending_changes end(%d)\n", err);
+	request_unlock();
+
+	DEBUG_PRINT("wait_for_playlist_pending_changes end(%d)\n", err);
 	return err;
 }
 
@@ -106,18 +111,24 @@ static int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 
+	request_lock();
+
 	while(err == 0) {
 		//DEBUG_PRINT("wait_for_playlist_loaded loop\n");
+		int loaded;
 
-		// We first check if we need to process any events
-		check_process_events(session);
+		session_lock(session);
+		loaded = sp_playlist_is_loaded(playlist->playlist);
+		session_unlock(session);
 
-		if (sp_playlist_is_loaded(playlist->playlist))
+		if (loaded)
 			break;
 
 		// Wait until a callback is fired
-		err = pthread_cond_timedwait(&session->cv, &session->mutex, &ts);
+		err = request_sleep_lock(&ts);
 	}
+
+	request_unlock();
 
 	//DEBUG_PRINT("wait_for_playlist_loaded end(%d)\n", err);
 	return err;
@@ -177,14 +188,12 @@ PHP_FUNCTION(spotify_playlist_create) {
 		RETURN_FALSE;
 	}
 
-	pthread_mutex_lock(&session->mutex);
-	if (!check_logged_in(session)) {
+	session_lock(session);
+
+	if (!session_logged_in(session)) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
 		goto error;
 	}
-
-    // Always check if some events need processing
-    check_process_events(session);
 
 	container = sp_session_playlistcontainer (session->session);
 	if (container == NULL) {
@@ -204,15 +213,15 @@ PHP_FUNCTION(spotify_playlist_create) {
 		goto error;
 	}
 
-	wait_for_playlist_pending_changes(resource);
+	session_unlock(session);
 
-	pthread_mutex_unlock(&session->mutex);
+	wait_for_playlist_pending_changes(resource);
 
 	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_playlist);
 	return;
 
 error:
-	pthread_mutex_unlock(&session->mutex);
+	session_unlock(session);
 	RETURN_FALSE;
 }
 /* }}} */
@@ -234,26 +243,29 @@ PHP_FUNCTION(spotify_playlist_name) {
     ZEND_FETCH_RESOURCE(playlist, php_spotify_playlist*, &zplaylist, -1, PHP_SPOTIFY_PLAYLIST_RES_NAME, le_spotify_playlist);
 
     session = playlist->session;
-    pthread_mutex_lock(&session->mutex);
 
-    if (!check_logged_in(session)) {
+    session_lock(session);
+
+    if (!session_logged_in(session)) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
-		pthread_mutex_unlock(&session->mutex);
+		session_unlock(session);
 		RETURN_FALSE;
 	}
+
+    session_unlock(session);
 
     // Always check if the playlist is loaded
     err = wait_for_playlist_loaded(playlist);
     if (err == ETIMEDOUT) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Timeout while loading playlist metadata.");
-		pthread_mutex_unlock(&session->mutex);
 		RETURN_FALSE;
     }
 
-    // TODO WAIT FOR PLAYLIST IS LOADED
+    session_lock(session);
+
     name = sp_playlist_name(playlist->playlist);
 
-    pthread_mutex_unlock(&session->mutex);
+    session_unlock(session);
 
     RETURN_STRING(name, 1);
 }
@@ -283,19 +295,17 @@ PHP_FUNCTION(spotify_playlist_rename) {
 	}
 
     session = playlist->session;
-    pthread_mutex_lock(&session->mutex);
+    session_lock(session);
 
-    if (!check_logged_in(session)) {
+    if (!session_logged_in(session)) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
-		pthread_mutex_unlock(&session->mutex);
+		session_unlock(session);
 		RETURN_FALSE;
 	}
 
-    // Always check if some events need processing
-    check_process_events(session);
-
 	err = sp_playlist_rename(playlist->playlist, name);
-	pthread_mutex_unlock(&session->mutex);
+
+	session_unlock(session);
 
 	if (err != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = err;
@@ -340,15 +350,12 @@ PHP_FUNCTION(spotify_playlist_add_tracks) {
     sp_tracks = emalloc(sizeof(sp_track *) * tracks_count);
 
     session = playlist->session;
-    pthread_mutex_lock(&session->mutex);
+    session_lock(session);
 
-    if (!check_logged_in(session)) {
+    if (!session_logged_in(session)) {
 		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
 		goto cleanup;
 	}
-
-    // Always check if some events need processing
-    check_process_events(session);
 
     zend_hash_internal_pointer_reset_ex(tracks, &tracks_p);
     while (zend_hash_get_current_data_ex(tracks, (void**) &ztrack, &tracks_p) == SUCCESS) {
@@ -400,8 +407,12 @@ PHP_FUNCTION(spotify_playlist_add_tracks) {
 		goto cleanup;
 	}
 
+	session_unlock(session);
+
 	// For this function check that the playlist has actually been commited
 	wait_for_playlist_pending_changes(playlist);
+
+	session_lock(session);
 
 	return_true = 1;
 
@@ -413,7 +424,7 @@ cleanup:
 		sp_track_release(sp_tracks[i]);
 	}
 
-	pthread_mutex_unlock(&session->mutex);
+	session_unlock(session);
 
 	efree(sp_tracks);
 
@@ -441,15 +452,12 @@ PHP_FUNCTION(spotify_playlist_uri) {
     ZEND_FETCH_RESOURCE(playlist, php_spotify_playlist*, &zplaylist, -1, PHP_SPOTIFY_PLAYLIST_RES_NAME, le_spotify_playlist);
 
     session = playlist->session;
-    pthread_mutex_lock(&session->mutex);
-
-    // Always check if some events need processing
-    check_process_events(session);
+    session_lock(session);
 
     link = sp_link_create_from_playlist(playlist->playlist);
     if (link == NULL) {
 		php_error_docref(NULL TSRMLS_CC, E_WARNING, "There was a error creating the link");
-		pthread_mutex_unlock(&session->mutex);
+		session_unlock(session);
 		RETURN_FALSE;
     }
 
@@ -458,7 +466,7 @@ PHP_FUNCTION(spotify_playlist_uri) {
     sp_link_as_string(link, link_uri, 256);
     sp_link_release(link);
 
-    pthread_mutex_unlock(&session->mutex);
+    session_unlock(session);
 
     RETURN_STRING(link_uri, 0);
 }

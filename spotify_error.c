@@ -15,29 +15,30 @@
    Returns the last global error code or the last session specific one. */
 PHP_FUNCTION(spotify_last_error) {
     zval *zsession = NULL;
+    sp_error last_error;
 
     if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|r", &zsession) == FAILURE) {
         RETURN_FALSE;
     }
 
     if (zsession) {
-		sp_error last_error;
+    	// Return the session error
 		php_spotify_session *session;
 
 		// Check its a spotify session (otherwise RETURN_FALSE)
 		ZEND_FETCH_RESOURCE(session, php_spotify_session*, &zsession, -1, PHP_SPOTIFY_SESSION_RES_NAME, le_spotify_session);
 
 		// Fetch the error in a thread safe way
-		pthread_mutex_lock(&session->mutex);
+		session_lock(session);
 		last_error = session->last_error;
-		pthread_mutex_unlock(&session->mutex);
+		session_lock(session);
 
-		// Return the session error
-		RETURN_LONG( last_error );
+    } else {
+    	// Return the global error
+    	last_error = SPOTIFY_G(last_error);
     }
 
-    // Return the global error
-	RETURN_LONG( SPOTIFY_G(last_error) );
+    RETURN_LONG( last_error );
 }
 /* }}} */
 
@@ -51,6 +52,7 @@ PHP_FUNCTION(spotify_error_message) {
 		RETURN_FALSE;
 	}
 
+	// I'm assuming this can be called safely from multiple concurrent threads
 	msg = sp_error_message((sp_error)error);
 
 	RETURN_STRING(msg, 1);

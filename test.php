@@ -38,9 +38,19 @@
 	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
 	echo 'Session user: ' . spotify_session_user( $session ) . "\n";
 
-	spotify_session_logout($session);
-	var_dump ( $session );
-	exit();
+	$session2 = spotify_session_login('bramp', $password, $appkey);
+	var_dump ( $session2 );
+	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session2 ) ] . "\n";
+	echo 'Session user: ' . spotify_session_user( $session2 ) . "\n";
+
+	//spotify_session_logout($session2);
+	//var_dump ( $session );
+	//var_dump ( $session2 );
+
+	//echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
+	//echo 'Session user: ' . spotify_session_user( $session ) . "\n";
+
+	//exit();
 
 	// Now create a playlist
 	$playlist = spotify_playlist_create($session, 'Test');
@@ -74,5 +84,5 @@
 		die_error('spotify_playlist_add_tracks');
 	}
 
-	spotify_session_logout($session);
+	//spotify_session_logout($session);
 ?>
