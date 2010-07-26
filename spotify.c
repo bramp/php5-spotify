@@ -79,7 +79,8 @@ php_spotify_session * session_resource;
 pthread_t       session_thread;
 pthread_mutex_t session_mutex; // Used to ensure the API is only called from one thread at a time
                                // Also used to protect the variables in the session resource.
-pthread_cond_t  session_cv;    // Used to wait for notify_main events
+sem_t           session_sem;   // Used to wait for notify_main events
+int             waiting_events;// Number of events waiting to be processed
 volatile int running;
 
 // This are blocked on when waiting for a callback (such as login).
@@ -93,16 +94,14 @@ static void *session_main_thread(void *data) {
 
 	//DEBUG_PRINT("session_main_thread\n");
 
-	pthread_mutex_lock(&session_mutex);
-
 wait_for_session:
 
-	//DEBUG_PRINT("session_main_thread wait_for_session\n");
+	DEBUG_PRINT("session_main_thread wait_for_session\n");
 
 	while(running) {
 
 		// Wait until a callback is fired
-		pthread_cond_wait(&session_cv, &session_mutex);
+		sem_wait(&session_sem);
 
 		if (session) // Break when the session is good
 			break;
@@ -110,7 +109,7 @@ wait_for_session:
 
 	pthread_mutex_unlock(&session_mutex);
 
-	//DEBUG_PRINT("session_main_thread main\n");
+	DEBUG_PRINT("session_main_thread main\n");
 
 	while(running) {
 		int timeout = -1; // TODO use the timeout
@@ -118,17 +117,14 @@ wait_for_session:
 		sp_session_process_events(session, &timeout);
 
 		// Wait until a callback is fired
-		pthread_mutex_lock(&session_mutex);
-		pthread_cond_wait(&session_cv, &session_mutex);
+		sem_wait(&session_sem);
 
-		DEBUG_PRINT("session_main_thread wakeup\n");
+		DEBUG_PRINT("session_main_thread wakeup timeout:%d\n", timeout);
 
 		// Check if the session has been killed
 		if (session == NULL)
 			// Not very elegant, goto, but it is neat
 			goto wait_for_session;
-
-		pthread_mutex_unlock(&session_mutex);
 	}
 
 	DEBUG_PRINT("session_main_thread end\n");
@@ -219,9 +215,9 @@ int session_init() {
 		return FAILURE;
 	}
 
-	err = pthread_cond_init (&session_cv, NULL);
+	err = sem_init(&session_sem, 0, 0);
 	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init() failed!");
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, sem_init() failed!");
 
 		pthread_mutex_destroy(&session_mutex);
 		return FAILURE;
@@ -229,10 +225,10 @@ int session_init() {
 
 	// Create a single "main" thread, used to handle sp_session_process_events()
 	err = pthread_create(&session_thread, NULL, session_main_thread, NULL);
-    if (err){
+    if ( err ) {
     	php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_create() failed!");
     	pthread_mutex_destroy(&session_mutex);
-    	pthread_cond_destroy (&session_cv);
+    	sem_destroy          (&session_sem);
     	return FAILURE;
     }
 
@@ -243,11 +239,11 @@ void session_shutdown() {
 	DEBUG_PRINT("session_shutdown\n");
 
 	running = 0;
-	pthread_cond_signal(&session_cv);
+	sem_post(&session_sem);
 	pthread_join(session_thread, NULL);
 
 	pthread_mutex_destroy(&session_mutex);
-	pthread_cond_destroy (&session_cv);
+	sem_destroy (&session_sem);
 }
 
 /* {{{ PHP_MINIT_FUNCTION

@@ -8,6 +8,7 @@
 #define PHP_SPOTIFY_H
 
 #include <pthread.h>
+#include <semaphore.h>
 #include <libspotify/api.h>
 
 extern zend_module_entry spotify_module_entry;
@@ -90,8 +91,8 @@ int  request_sleep(const struct timespec *restrict abstime);
 extern sp_session *    session;        // The single session
 extern php_spotify_session * session_resource;
 extern pthread_t       session_thread; // The thread handling notifiy_main_thread events
-extern pthread_mutex_t session_mutex;  // This will move into the session resource
-extern pthread_cond_t  session_cv;     // But they ensure only one thread uses the session at a time.
+extern pthread_mutex_t session_mutex;  // This will be moved into the session resource
+extern sem_t session_sem;              // But they ensure only one thread uses the session at a time.
 
 // The module functions
 PHP_MINIT_FUNCTION(spotify);

@@ -176,9 +176,7 @@ static void notify_main_thread (sp_session *session) {
 
 	DEBUG_PRINT("notify_main_thread\n");
 
-	session_lock(resource);
-	pthread_cond_signal(&session_cv);
-	session_unlock(resource);
+	sem_post(&session_sem);
 }
 
 static void log_message (sp_session *session, const char *data) {
@@ -294,9 +292,9 @@ static int _mkdir(const char *dir, mode_t mode) {
 	if (stat(dir, &st)) {
 		// If the path doesn't exist, lets try and make it
 		if (errno == ENOENT) {
-			if ( mkdir(dir, mode) )
-				return -1;
+			return mkdir(dir, mode);
 		}
+		return -1;
 	}
 
 	return !S_ISDIR(st.st_mode);
@@ -350,8 +348,8 @@ PHP_FUNCTION(spotify_session_login) {
 	//list_entry *le;
 	list_entry new_le;
 
-	char * cache_location;
-	char * settings_location;
+	char * cache_location    = NULL;
+	char * settings_location = NULL;
 
 	char *user, *pass, *key;
 	int user_len, pass_len, key_len;
@@ -381,9 +379,12 @@ PHP_FUNCTION(spotify_session_login) {
 			session_unlock(resource);
 			RETURN_FALSE;
 		}
+		DEBUG_PRINT("spotify_session_login reusing old session\n");
 		// Now jump down and ensure we have logged in, etc
-		if (!session_logged_in(resource))
+		if (!session_logged_in(resource)) {
+			DEBUG_PRINT("spotify_session_login old session wasn't logged in!\n");
 			goto login;
+		}
 		goto done;
 	}
 
@@ -442,6 +443,8 @@ PHP_FUNCTION(spotify_session_login) {
 	efree(cache_location);
 	efree(settings_location);
 
+	DEBUG_PRINT("sp_session_init %d\n", error);
+
 	if (error != SP_ERROR_OK) {
 		SPOTIFY_G(last_error) = error;
 		goto error;
@@ -450,7 +453,7 @@ PHP_FUNCTION(spotify_session_login) {
 	// Set the global session and signal for the main_thread to start
 	session_resource = resource;
 	session          = resource->session;
-	pthread_cond_signal(&session_cv);
+	sem_post(&session_sem);
 
 login:
 	DEBUG_PRINT("sp_session_login\n");
@@ -490,9 +493,12 @@ done:
 	return;
 
 error:
+	DEBUG_PRINT("sp_session_login err 1\n");
 	// TODO In the future libspotify will add sp_session_release. Call that here.
 	session_unlock(resource);
+	DEBUG_PRINT("sp_session_login err 2\n");
 	session_resource_destory(resource);
+	DEBUG_PRINT("sp_session_login err 3\n");
 	RETURN_FALSE;
 }
 /* }}} */

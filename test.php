@@ -1,3 +1,4 @@
+<pre>
 <?php
 /*
  * Config stuff
@@ -37,26 +38,12 @@
 	var_dump ( $session );
 	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
 	echo 'Session user: ' . spotify_session_user( $session ) . "\n";
-
-	$session2 = spotify_session_login('bramp', $password, $appkey);
-	var_dump ( $session2 );
-	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session2 ) ] . "\n";
-	echo 'Session user: ' . spotify_session_user( $session2 ) . "\n";
-
-	//spotify_session_logout($session2);
-	//var_dump ( $session );
-	//var_dump ( $session2 );
-
-	//echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
-	//echo 'Session user: ' . spotify_session_user( $session ) . "\n";
-
-	//exit();
-
+	
 	// Use the time as the playlist name (just for debuggin purposes)
 	$playlistName = date("H:i:s");
 
 	// Now create a playlist
-	$playlist = spotify_playlist_create($session, $playlistName);
+	$playlist = spotify_playlist_create($session, $playlistName . '_before');
 	if (!$playlist) {
 		die_error('spotify_playlist_create');
 	}
@@ -65,6 +52,7 @@
 	echo 'Playlist name: ' . spotify_playlist_name( $playlist ) . "\n";
 	echo 'Playlist link: ' . spotify_playlist_uri ( $playlist ) . "\n";
 
+	// Now rename it (for the sake of it)
 	$err = spotify_playlist_rename($playlist, $playlistName . '_after');
 	if (!$err) {
 		die_error('spotify_playlist_create');
@@ -88,9 +76,9 @@
 	}
 
 	// I absolutely hate this BUT, if we don't sleep here the changes don't get sent back
-	// to the spotify server. Now I'm asking libspotify to tell me when the changes have
-	// been saved, and they should have been saved already, but obviously not. So to be
-	// save just sleep for 10 seconds.
+	// to the spotify server. Inside the spotify_playlist_add_tracks call I check if the
+	// changes have been saved, before returning. Libspotify says they are saved, but obviously
+	// not.
 	sleep(10);
 
 ?>
