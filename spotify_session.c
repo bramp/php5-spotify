@@ -63,6 +63,10 @@ int wait_for_logged_in(php_spotify_session *session) {
 		if (waiting == 0)
 			break;
 
+		// Poke the main thread. There is a timing issue, where if notify_main_thread is called
+		// and dealt with before sp_session_login, then everything grinds to a halt.
+		poke_main_thread(session);
+
 		// Wait until a callback is fired
 		err = request_sleep_lock(&ts);
 	}
@@ -180,13 +184,23 @@ static void message_to_user (sp_session *session, const char *message) {
 	DEBUG_PRINT("message_to_user: %s", message);
 }
 
+void poke_main_thread(php_spotify_session *resource) {
+	int value;
+
+	sem_getvalue(&resource->sem, &value);
+	DEBUG_PRINT("notify_main_thread %p before %d\n", &resource->sem, value);
+
+	sem_post(&resource->sem);
+
+	sem_getvalue(&resource->sem, &value);
+	DEBUG_PRINT("notify_main_thread %p after %d\n", &resource->sem, value);
+}
+
 static void notify_main_thread (sp_session *session) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
 
-	DEBUG_PRINT("notify_main_thread\n");
-
-	sem_post(&resource->sem);
+	poke_main_thread(resource);
 }
 
 static void log_message (sp_session *session, const char *data) {
@@ -220,6 +234,7 @@ void *session_main_thread(void *data); // Reference to the session thread
 // Creates a session resource object
 static php_spotify_session * session_resource_create(char *user) {
 	int err;
+	const char *errmsg;
 	php_spotify_session * resource;
 	pthread_mutexattr_t attr;
 
@@ -234,7 +249,7 @@ static php_spotify_session * session_resource_create(char *user) {
 
 	err = sem_init(&resource->sem, 0, 0);
 	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, sem_init() failed!");
+		errmsg = "Internal error, sem_init() failed!";
 		goto error_sem;
 	}
 
@@ -247,14 +262,14 @@ static php_spotify_session * session_resource_create(char *user) {
 	err = pthread_mutex_init(&resource->mutex, &attr);
 	pthread_mutexattr_destroy(&attr);
 	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init() failed!");
+		errmsg = "Internal error, pthread_mutex_init() failed!";
 		goto error_mux;
 	}
 
 	// Create a single "main" thread, used to handle sp_session_process_events()
 	err = pthread_create(&resource->thread, NULL, session_main_thread, resource);
     if ( err ) {
-    	php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_create() failed!");
+    	errmsg = "Internal error, pthread_create() failed!";
     	goto error_thread;
     }
 
@@ -270,6 +285,8 @@ error_sem:
 	pefree(resource->user, 1);
 	pefree(resource, 1);
 
+	php_error_docref(NULL TSRMLS_CC, E_ERROR, errmsg);
+
 	return NULL;
 }
 
@@ -282,7 +299,7 @@ static void session_resource_destory(php_spotify_session *resource) {
 
     // Kill the thread
 	resource->running = 0;
-	sem_post(&resource->sem);
+	poke_main_thread(resource);
 	pthread_join(resource->thread, NULL);
 
 	pthread_mutex_destroy(&resource->mutex);
@@ -296,6 +313,8 @@ static void session_resource_destory(php_spotify_session *resource) {
 void php_spotify_session_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
 {
 	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
+
+	DEBUG_PRINT("php_spotify_session_dtor\n");
 
     if (session) {
     	// Use reference counting and free the session
@@ -417,7 +436,7 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	if (user_len < 1) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "A blank username was given");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank username was given");
 		RETURN_FALSE;
 	}
 
@@ -428,8 +447,8 @@ PHP_FUNCTION(spotify_session_login) {
 		session_lock(resource);
 
 		if (strcmp(resource->user, user) != 0) {
-			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", resource->user);
 			session_unlock(resource);
+			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Only one session can be created per process. There is already a session for \"%s\"", resource->user);
 			RETURN_FALSE;
 		}
 		DEBUG_PRINT("spotify_session_login reusing old session\n");
@@ -442,12 +461,12 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	if (pass_len < 1) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "A blank password was given");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank password was given");
 		RETURN_FALSE;
 	}
 
 	if (key_len < 1) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "A blank appkey was given");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "A blank appkey was given");
 		RETURN_FALSE;
 	}
 
@@ -461,12 +480,12 @@ PHP_FUNCTION(spotify_session_login) {
 
 	// A bug in libspotify means we should create the directories
 	if ( mkdir_recursive(cache_location, S_IRWXU) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create cache directory \"%s\"", cache_location);
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Failed to create cache directory \"%s\"", cache_location);
 		goto error;
 	}
 
 	if ( mkdir_recursive(settings_location, S_IRWXU) ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create settings directory \"%s\"", settings_location);
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Failed to create settings directory \"%s\"", settings_location);
 		goto error;
 	}
 
@@ -525,7 +544,8 @@ login:
 
 	err = wait_for_logged_in(resource);
 	if (err == ETIMEDOUT) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Timeout while logging in.");
+		DEBUG_PRINT("Timeout\n");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Timeout while logging in.");
 		goto error;
 	}
 
@@ -541,16 +561,13 @@ done:
 	session_unlock(resource);
 
 	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
-
 	return;
 
 error:
-	DEBUG_PRINT("sp_session_login err 1\n");
+	DEBUG_PRINT("sp_session_login err\n");
 	// TODO In the future libspotify will add sp_session_release. Call that here.
 	session_unlock(resource);
-	DEBUG_PRINT("sp_session_login err 2\n");
 	session_resource_destory(resource);
-	DEBUG_PRINT("sp_session_login err 3\n");
 	RETURN_FALSE;
 }
 /* }}} */
@@ -632,8 +649,8 @@ PHP_FUNCTION(spotify_session_user) {
     session_lock(session);
     user = sp_session_user(session->session);
     if (user == NULL) {
-        php_error_docref(NULL TSRMLS_CC, E_ERROR, "The session is not logged in.");
-        session_unlock(session);
+    	session_unlock(session);
+    	php_error_docref(NULL TSRMLS_CC, E_WARNING, "The session is not logged in.");
         RETURN_FALSE;
     }
 

@@ -38,7 +38,9 @@
 	var_dump ( $session );
 	echo 'Session state: ' . $session_states[ spotify_session_connectionstate( $session ) ] . "\n";
 	echo 'Session user: ' . spotify_session_user( $session ) . "\n";
-	
+
+	//exit();
+
 	// Use the time as the playlist name (just for debuggin purposes)
 	$playlistName = date("H:i:s");
 

@@ -81,7 +81,7 @@ void *session_main_thread(void *data) {
 
 	php_spotify_session * resource = data;
 
-	DEBUG_PRINT("session_main_thread start\n");
+	DEBUG_PRINT("session_main_thread start %p\n", &resource->sem);
 
 	//FILE *fp;
 	//fp = fopen("/tmp/libspotify-php/log", "a+");
@@ -94,12 +94,17 @@ void *session_main_thread(void *data) {
 
 	// Wait until the session is good
 	while(resource->running) {
+		int timeout = -1; // TODO use the timeout
+
 		// Read it into a seperate var so it doesn't get changed underneath us
 		sp_session * session = resource->session;
 		if (session != NULL) {
-			int timeout = -1; // TODO use the timeout
 
+			session_lock(resource);
 			sp_session_process_events(session, &timeout);
+			session_unlock(resource);
+
+			DEBUG_PRINT("session_main_thread %d\n", timeout);
 		}
 
 		// Wait until a callback is fired
@@ -162,9 +167,8 @@ int request_init() {
 
 	err = pthread_cond_init (&request_cv, NULL);
 	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init() failed!");
-
 		pthread_mutex_destroy(&request_mutex);
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_cond_init() failed!");
 		return FAILURE;
 	}
 

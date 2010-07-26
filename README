@@ -25,3 +25,5 @@ Developer docs:
 				If not, error out.
 		Otherwise create a new php_spotify_session and session.
 			The php_spotify_session contains pthread_t and other syncronisation objects
+
+	The php_spotify_session will be deleted when the PHP process ends

@@ -191,7 +191,7 @@ PHP_FUNCTION(spotify_playlist_create) {
 	session_lock(session);
 
 	if (!session_logged_in(session)) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Session is not logged in.");
 		goto error;
 	}
 
@@ -203,7 +203,7 @@ PHP_FUNCTION(spotify_playlist_create) {
 
 	playlist = sp_playlistcontainer_add_new_playlist(container, name);
 	if (playlist == NULL) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Failed to create playlist.");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Failed to create playlist.");
 		goto error;
 	}
 
@@ -247,8 +247,8 @@ PHP_FUNCTION(spotify_playlist_name) {
     session_lock(session);
 
     if (!session_logged_in(session)) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
-		session_unlock(session);
+    	session_unlock(session);
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Session is not logged in.");
 		RETURN_FALSE;
 	}
 
@@ -257,7 +257,7 @@ PHP_FUNCTION(spotify_playlist_name) {
     // Always check if the playlist is loaded
     err = wait_for_playlist_loaded(playlist);
     if (err == ETIMEDOUT) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Timeout while loading playlist metadata.");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Timeout while loading playlist metadata.");
 		RETURN_FALSE;
     }
 
@@ -298,8 +298,8 @@ PHP_FUNCTION(spotify_playlist_rename) {
     session_lock(session);
 
     if (!session_logged_in(session)) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
-		session_unlock(session);
+    	session_unlock(session);
+    	php_error_docref(NULL TSRMLS_CC, E_WARNING, "Session is not logged in.");
 		RETURN_FALSE;
 	}
 
@@ -353,7 +353,7 @@ PHP_FUNCTION(spotify_playlist_add_tracks) {
     session_lock(session);
 
     if (!session_logged_in(session)) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Session is not logged in.");
+		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Session is not logged in.");
 		goto cleanup;
 	}
 
@@ -380,8 +380,8 @@ PHP_FUNCTION(spotify_playlist_add_tracks) {
     	sp_tracks[i] = sp_link_as_track(track_link);
 
     	if (sp_tracks[i] == NULL) {
-    		php_error_docref(NULL TSRMLS_CC, E_WARNING, "\"%s\" is not a spotify track link", track_str);
     		sp_link_release(track_link);
+    		php_error_docref(NULL TSRMLS_CC, E_WARNING, "\"%s\" is not a spotify track link", track_str);
     		goto cleanup;
     	}
 
@@ -456,8 +456,8 @@ PHP_FUNCTION(spotify_playlist_uri) {
 
     link = sp_link_create_from_playlist(playlist->playlist);
     if (link == NULL) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "There was a error creating the link");
-		session_unlock(session);
+    	session_unlock(session);
+    	php_error_docref(NULL TSRMLS_CC, E_WARNING, "There was a error creating the link");
 		RETURN_FALSE;
     }
 
