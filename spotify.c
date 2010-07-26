@@ -70,68 +70,29 @@ zend_module_entry spotify_module_entry = {
 ZEND_GET_MODULE(spotify)
 #endif
 
+// Some dtors
+void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC);
+void php_spotify_playlist_dtor (zend_rsrc_list_entry *rsrc TSRMLS_DC);
+
+
 // This are blocked on when waiting for a callback (such as login).
 // In future we could split these into multiple mutex/cv pairs, one for each type of
 // callback.
 pthread_mutex_t request_mutex;  // Mutex to lock on when waiting for a (libspotify) callback
 pthread_cond_t  request_cv;     // Conditional var for blocking for a callback
 
-// This basicaly loops waiting for notify_main_threads
-void *session_main_thread(void *data) {
-
-	php_spotify_session * resource = data;
-
-	DEBUG_PRINT("session_main_thread start %p\n", &resource->sem);
-
-	//FILE *fp;
-	//fp = fopen("/tmp/libspotify-php/log", "a+");
-
-	//fprintf(fp, "session_main_thread %d:%X", getpid(), (unsigned int)pthread_self());
-	//fprintf(fp, "session_main_thread %p", &resource->sem);
-
-	//php_error_docref(NULL TSRMLS_CC, E_NOTICE, "session_main_thread %d:%X", getpid(), (unsigned int)pthread_self());
-	//php_error_docref(NULL TSRMLS_CC, E_NOTICE, "session_main_thread %p", &session_sem);
-
-	// Wait until the session is good
-	while(resource->running) {
-		int timeout = -1; // TODO use the timeout
-
-		// Read it into a seperate var so it doesn't get changed underneath us
-		sp_session * session = resource->session;
-		if (session != NULL) {
-
-			session_lock(resource);
-			sp_session_process_events(session, &timeout);
-			session_unlock(resource);
-
-			DEBUG_PRINT("session_main_thread %d\n", timeout);
-		}
-
-		// Wait until a callback is fired
-		sem_wait(&resource->sem);
-
-		DEBUG_PRINT("session_main_thread wakeup\n");
-	}
-
-	DEBUG_PRINT("session_main_thread end\n");
-
-	//fclose(fp);
-
-	pthread_exit(NULL);
-}
-
 void request_lock() {
-	//DEBUG_PRINT("request_lock\n");
+	DEBUG_PRINT("request_lock\n");
 	pthread_mutex_lock ( &request_mutex );
 }
 
 void request_unlock() {
-	//DEBUG_PRINT("request_unlock\n");
+	DEBUG_PRINT("request_unlock\n");
 	pthread_mutex_unlock ( &request_mutex );
 }
 
 void request_wake_lock() {
-	//DEBUG_PRINT("request_wake_lock\n");
+	DEBUG_PRINT("request_wake_lock\n");
 	pthread_cond_broadcast( &request_cv );
 }
 

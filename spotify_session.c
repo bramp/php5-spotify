@@ -3,8 +3,6 @@
  * By Andrew Brampton <me@bramp.net> 2010
  *    for outsideline.co.uk
  */
-#define _GNU_SOURCE
-
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -13,18 +11,21 @@
 #include "php_spotify.h"
 
 #include <assert.h>
-#include <pthread.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+void poke_main_thread(php_spotify_session *resource);
+
+php_spotify_session * session_resource_create(char *user);
+void session_resource_destory(php_spotify_session *resource);
 
 // Loops waiting for a logged in event
 // If one is not found after X seconds, a error is returned.
 int wait_for_logged_in(php_spotify_session *session) {
 	struct timespec ts;
 	int err = 0;
-	int value;
 
 	assert(session != NULL);
 
@@ -48,10 +49,6 @@ int wait_for_logged_in(php_spotify_session *session) {
 
 	request_lock();
 
-	sem_getvalue(&session->sem, &value);
-	DEBUG_PRINT("sem_getvalue P %p\n", &session->sem);
-	DEBUG_PRINT("sem_getvalue A %d\n", value);
-
 	while(err == 0) {
 		int waiting;
 
@@ -70,9 +67,6 @@ int wait_for_logged_in(php_spotify_session *session) {
 		// Wait until a callback is fired
 		err = request_sleep_lock(&ts);
 	}
-
-	sem_getvalue(&session->sem, &value);
-	DEBUG_PRINT("sem_getvalue B %d\n", value);
 
 	request_unlock();
 
@@ -184,18 +178,6 @@ static void message_to_user (sp_session *session, const char *message) {
 	DEBUG_PRINT("message_to_user: %s", message);
 }
 
-void poke_main_thread(php_spotify_session *resource) {
-	int value;
-
-	sem_getvalue(&resource->sem, &value);
-	DEBUG_PRINT("notify_main_thread %p before %d\n", &resource->sem, value);
-
-	sem_post(&resource->sem);
-
-	sem_getvalue(&resource->sem, &value);
-	DEBUG_PRINT("notify_main_thread %p after %d\n", &resource->sem, value);
-}
-
 static void notify_main_thread (sp_session *session) {
 	php_spotify_session *resource = sp_session_userdata(session);
 	assert(resource != NULL);
@@ -229,136 +211,9 @@ static sp_session_callbacks callbacks = {
 	NULL, //&userinfo_updated,
 };
 
-void *session_main_thread(void *data); // Reference to the session thread
-
-// Creates a session resource object
-static php_spotify_session * session_resource_create(char *user) {
-	int err;
-	const char *errmsg;
-	php_spotify_session * resource;
-	pthread_mutexattr_t attr;
-
-	DEBUG_PRINT("session_resource_create\n");
-
-	resource = pemalloc(sizeof(php_spotify_session), 1);
-	resource->session       = NULL;
-	resource->user          = pestrdup(user, 1);
-	resource->waiting_login = 0;
-	resource->waiting_logout= 0;
-	resource->running       = 1;
-
-	err = sem_init(&resource->sem, 0, 0);
-	if ( err ) {
-		errmsg = "Internal error, sem_init() failed!";
-		goto error_sem;
-	}
-
-	// TODO retest this assumption
-	// I hate to do it, but the mutex must be recursive. That's because
-	// libspotify sometimes calls the callbacks from the main thread (which causes a deadlock)
-	pthread_mutexattr_init(&attr);
-	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-
-	err = pthread_mutex_init(&resource->mutex, &attr);
-	pthread_mutexattr_destroy(&attr);
-	if ( err ) {
-		errmsg = "Internal error, pthread_mutex_init() failed!";
-		goto error_mux;
-	}
-
-	// Create a single "main" thread, used to handle sp_session_process_events()
-	err = pthread_create(&resource->thread, NULL, session_main_thread, resource);
-    if ( err ) {
-    	errmsg = "Internal error, pthread_create() failed!";
-    	goto error_thread;
-    }
-
-	return resource;
-
-error_thread:
-	pthread_mutex_destroy(&resource->mutex);
-
-error_mux:
-	sem_destroy (&resource->sem);
-
-error_sem:
-	pefree(resource->user, 1);
-	pefree(resource, 1);
-
-	php_error_docref(NULL TSRMLS_CC, E_ERROR, errmsg);
-
-	return NULL;
-}
-
-static void session_resource_destory(php_spotify_session *resource) {
-
-	if (resource == NULL)
-		return;
-
-	DEBUG_PRINT("session_resource_destory\n");
-
-    // Kill the thread
-	resource->running = 0;
-	poke_main_thread(resource);
-	pthread_join(resource->thread, NULL);
-
-	pthread_mutex_destroy(&resource->mutex);
-
-	sem_destroy (&resource->sem);
-
-	pefree(resource->user, 1);
-	pefree(resource, 1);
-}
-
-void php_spotify_session_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
-{
-	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
-
-	DEBUG_PRINT("php_spotify_session_dtor\n");
-
-    if (session) {
-    	// Use reference counting and free the session
-    	//zend_hash_add(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, &new_le, sizeof(list_entry), NULL);
-    }
-}
-
-void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC)
-{
-	php_spotify_session *session = (php_spotify_session*)rsrc->ptr;
-
-	DEBUG_PRINT("php_spotify_session_p_dtor\n");
-
-    if (session) {
-    	int needsUnlock = 1;
-
-        session_lock(session);
-
-        // If we are logged in, log us out (and therefore save any remaining state).
-        if (session_logged_in(session)) {
-
-			sp_error error = sp_session_logout(session->session);
-
-			if (error == SP_ERROR_OK) {
-				// We don't need to hold the session lock when we enter the wait function.
-				session_unlock(session);
-				needsUnlock = 0;
-
-				wait_for_logged_out(session);
-			}
-        }
-
-        if (needsUnlock)
-        	session_unlock(session);
-
-        session_resource_destory(session);
-    }
-
-    DEBUG_PRINT("php_spotify_session_p_dtor end\n");
-}
-
-
 /* {{{ My own mkdir that checks if the dir exists and is a dir
  * Returns 0 on success, non-zero otherwise.
+ * TODO Change this to the built in PHP one
  */
 static int _mkdir(const char *dir, mode_t mode) {
 	struct stat st;
@@ -549,9 +404,8 @@ login:
 		goto error;
 	}
 
-done:
-
 	session_lock(resource);
+done:
 
 	if (!session_logged_in(resource)) {
 		SPOTIFY_G(last_error) = resource->last_error;

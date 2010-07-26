@@ -24,12 +24,12 @@ extern zend_module_entry spotify_module_entry;
 #	define PHP_SPOTIFY_API
 #endif
 
-#define DEBUG_SPOTIFY
+//#define DEBUG_SPOTIFY
 
 #ifdef DEBUG_SPOTIFY
 # define DEBUG_PRINT(f, s...) php_printf("%d:%X ", getpid(), (unsigned int)pthread_self()); php_printf(f, ## s)
 #else
-# define DEBUG_PRINT(f)
+# define DEBUG_PRINT(f, s...)
 #endif
 
 #ifdef ZTS
@@ -54,7 +54,7 @@ typedef struct _php_spotify_session {
 	sem_t           sem;    // Used to wait for notify_main events
 	pthread_mutex_t mutex;  // Used to ensure the API is only called from one thread at a time
 	                        // Also used to protect the variables in this struct
-	int running : 1;        // Used to stop the main thread
+	volatile int running : 1; // Used to stop the main thread
 
 } php_spotify_session;
 
@@ -67,14 +67,7 @@ typedef struct _php_spotify_playlist {
 extern int le_spotify_session;
 extern int le_spotify_playlist;
 
-// Some dtors
-void php_spotify_session_dtor  (zend_rsrc_list_entry *rsrc TSRMLS_DC);
-void php_spotify_session_p_dtor(zend_rsrc_list_entry *rsrc TSRMLS_DC);
-void php_spotify_playlist_dtor (zend_rsrc_list_entry *rsrc TSRMLS_DC);
-
 // Some common functions
-void wakeup_thread_lock(php_spotify_session *session);
-void wakeup_thread(php_spotify_session *session);
 int session_logged_in(php_spotify_session *session);
 
 // Request locking functions
@@ -87,20 +80,13 @@ int  request_sleep(const struct timespec *restrict abstime);
 
 // Macros for locking - They are macros so the __FILE__ define works in a useful way.
 // Eventually use res->mutex, but at the moment just use the global session_mutex;
-#ifndef DEBUG_SPOTIFY
+#ifdef DEBUG_SPOTIFY
 # define session_lock(res)   pthread_mutex_lock  (&res->mutex); php_printf("%X LOCK %s:%d\n",   (unsigned int)pthread_self(),  __FILE__, __LINE__);
 # define session_unlock(res) pthread_mutex_unlock(&res->mutex); php_printf("%X UNLOCK %s:%d\n", (unsigned int)pthread_self(),  __FILE__, __LINE__);
 #else
 # define session_lock(res)   pthread_mutex_lock  (&res->mutex);
 # define session_unlock(res) pthread_mutex_unlock(&res->mutex);
 #endif
-
-// The global vars
-extern sp_session *    session;        // The single session
-//extern php_spotify_session * session_resource;
-extern pthread_t       session_thread; // The thread handling notifiy_main_thread events
-extern pthread_mutex_t session_mutex;  // This will be moved into the session resource
-                                      // But they ensure only one thread uses the session at a time.
 
 // The module functions
 PHP_MINIT_FUNCTION(spotify);
