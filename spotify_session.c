@@ -3,6 +3,8 @@
  * By Andrew Brampton <me@bramp.net> 2010
  *    for outsideline.co.uk
  */
+#define _GNU_SOURCE
+
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -22,6 +24,7 @@
 int wait_for_logged_in(php_spotify_session *session) {
 	struct timespec ts;
 	int err = 0;
+	int value;
 
 	assert(session != NULL);
 
@@ -45,12 +48,16 @@ int wait_for_logged_in(php_spotify_session *session) {
 
 	request_lock();
 
+	sem_getvalue(&session->sem, &value);
+	DEBUG_PRINT("sem_getvalue P %p\n", &session->sem);
+	DEBUG_PRINT("sem_getvalue A %d\n", value);
+
 	while(err == 0) {
 		int waiting;
 
-		session_lock();
+		session_lock(session);
 		waiting = session->waiting_login;
-		session_unlock();
+		session_unlock(session);
 
 		// If we are finally logged in break.
 		if (waiting == 0)
@@ -59,6 +66,9 @@ int wait_for_logged_in(php_spotify_session *session) {
 		// Wait until a callback is fired
 		err = request_sleep_lock(&ts);
 	}
+
+	sem_getvalue(&session->sem, &value);
+	DEBUG_PRINT("sem_getvalue B %d\n", value);
 
 	request_unlock();
 
@@ -95,9 +105,9 @@ int wait_for_logged_out(php_spotify_session *session) {
 	while(err == 0) {
 		int waiting;
 
-		session_lock();
+		session_lock(session);
 		waiting = session->waiting_logout;
-		session_unlock();
+		session_unlock(session);
 
 		// If we are finally logged in break.
 		if (waiting == 0)
@@ -176,7 +186,7 @@ static void notify_main_thread (sp_session *session) {
 
 	DEBUG_PRINT("notify_main_thread\n");
 
-	sem_post(&session_sem);
+	sem_post(&resource->sem);
 }
 
 static void log_message (sp_session *session, const char *data) {
@@ -205,20 +215,62 @@ static sp_session_callbacks callbacks = {
 	NULL, //&userinfo_updated,
 };
 
+void *session_main_thread(void *data); // Reference to the session thread
+
 // Creates a session resource object
 static php_spotify_session * session_resource_create(char *user) {
+	int err;
 	php_spotify_session * resource;
+	pthread_mutexattr_t attr;
 
 	DEBUG_PRINT("session_resource_create\n");
 
 	resource = pemalloc(sizeof(php_spotify_session), 1);
 	resource->session       = NULL;
 	resource->user          = pestrdup(user, 1);
-	resource->events        = 0;
 	resource->waiting_login = 0;
 	resource->waiting_logout= 0;
+	resource->running       = 1;
+
+	err = sem_init(&resource->sem, 0, 0);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, sem_init() failed!");
+		goto error_sem;
+	}
+
+	// TODO retest this assumption
+	// I hate to do it, but the mutex must be recursive. That's because
+	// libspotify sometimes calls the callbacks from the main thread (which causes a deadlock)
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+	err = pthread_mutex_init(&resource->mutex, &attr);
+	pthread_mutexattr_destroy(&attr);
+	if ( err ) {
+		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init() failed!");
+		goto error_mux;
+	}
+
+	// Create a single "main" thread, used to handle sp_session_process_events()
+	err = pthread_create(&resource->thread, NULL, session_main_thread, resource);
+    if ( err ) {
+    	php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_create() failed!");
+    	goto error_thread;
+    }
 
 	return resource;
+
+error_thread:
+	pthread_mutex_destroy(&resource->mutex);
+
+error_mux:
+	sem_destroy (&resource->sem);
+
+error_sem:
+	pefree(resource->user, 1);
+	pefree(resource, 1);
+
+	return NULL;
 }
 
 static void session_resource_destory(php_spotify_session *resource) {
@@ -228,10 +280,14 @@ static void session_resource_destory(php_spotify_session *resource) {
 
 	DEBUG_PRINT("session_resource_destory\n");
 
-	/*
+    // Kill the thread
+	resource->running = 0;
+	sem_post(&resource->sem);
+	pthread_join(resource->thread, NULL);
+
 	pthread_mutex_destroy(&resource->mutex);
-	pthread_cond_destroy (&resource->cv);
-	*/
+
+	sem_destroy (&resource->sem);
 
 	pefree(resource->user, 1);
 	pefree(resource, 1);
@@ -345,8 +401,7 @@ PHP_FUNCTION(spotify_session_login) {
 
 	php_spotify_session *resource = NULL;
 	int err;
-	//list_entry *le;
-	list_entry new_le;
+	list_entry *le, new_le;
 
 	char * cache_location    = NULL;
 	char * settings_location = NULL;
@@ -367,13 +422,11 @@ PHP_FUNCTION(spotify_session_login) {
 	}
 
 	// Check if we already have a session
-	session_lock(resource); // This works because currently the session lock is global. Later it will be inside the resource struct
-	/*
 	if (zend_hash_find(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, (void **)&le) == SUCCESS) {
 		resource = le->ptr;
-	*/
-	if (session_resource != NULL) {
-		resource = session_resource;
+
+		session_lock(resource);
+
 		if (strcmp(resource->user, user) != 0) {
 			php_error_docref(NULL TSRMLS_CC, E_ERROR, "Only one session can be created per process. There is already a session for \"%s\"", resource->user);
 			session_unlock(resource);
@@ -402,9 +455,9 @@ PHP_FUNCTION(spotify_session_login) {
 	//spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/cache/",    user);
 	//spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/settings/", user);
 
-	// To be multiple process safe, use the PID
-	spprintf(&cache_location,    0, "/tmp/libspotify-php/%d/cache/",    getpid());
-	spprintf(&settings_location, 0, "/tmp/libspotify-php/%d/settings/", getpid());
+	// To be multiple process safe, use the PID + user
+	spprintf(&cache_location,    0, "/tmp/libspotify-php/%s/%d/cache/",    user, getpid());
+	spprintf(&settings_location, 0, "/tmp/libspotify-php/%s/%d/settings/", user, getpid());
 
 	// A bug in libspotify means we should create the directories
 	if ( mkdir_recursive(cache_location, S_IRWXU) ) {
@@ -436,6 +489,8 @@ PHP_FUNCTION(spotify_session_login) {
 	// Pass the resource to libspotify as userdata
 	config.userdata = resource;
 
+	session_lock(resource);
+
 	// Create the session
 	error = sp_session_init(&config, &resource->session);
 
@@ -450,12 +505,13 @@ PHP_FUNCTION(spotify_session_login) {
 		goto error;
 	}
 
-	// Set the global session and signal for the main_thread to start
-	session_resource = resource;
-	session          = resource->session;
-	sem_post(&session_sem);
+	// Store a reference in the persistence list
+	new_le.ptr  = resource;
+	new_le.type = le_spotify_session;
+	zend_hash_add(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, &new_le, sizeof(list_entry), NULL);
 
 login:
+
 	DEBUG_PRINT("sp_session_login\n");
 
 	// Now try and log in
@@ -473,9 +529,10 @@ login:
 		goto error;
 	}
 
+done:
+
 	session_lock(resource);
 
-done:
 	if (!session_logged_in(resource)) {
 		SPOTIFY_G(last_error) = resource->last_error;
 		goto error;
@@ -484,11 +541,6 @@ done:
 	session_unlock(resource);
 
 	ZEND_REGISTER_RESOURCE(return_value, resource, le_spotify_session);
-
-	/* Store a reference in the persistence list */
-	new_le.ptr  = resource;
-	new_le.type = le_spotify_session;
-	zend_hash_add(&EG(persistent_list), PHP_SPOTIFY_SESSION_RES_NAME, strlen(PHP_SPOTIFY_SESSION_RES_NAME) + 1, &new_le, sizeof(list_entry), NULL);
 
 	return;
 

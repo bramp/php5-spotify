@@ -9,8 +9,6 @@
  *  Check ZEND_FETCH_RESOURCE actually returns if the wrong resource is given
  *
  */
-#define _GNU_SOURCE
-
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -72,17 +70,6 @@ zend_module_entry spotify_module_entry = {
 ZEND_GET_MODULE(spotify)
 #endif
 
-// To ensure we don't create multiple session per process
-// with have one single global session.
-sp_session *    session;
-php_spotify_session * session_resource;
-pthread_t       session_thread;
-pthread_mutex_t session_mutex; // Used to ensure the API is only called from one thread at a time
-                               // Also used to protect the variables in the session resource.
-sem_t           session_sem;   // Used to wait for notify_main events
-int             waiting_events;// Number of events waiting to be processed
-volatile int running;
-
 // This are blocked on when waiting for a callback (such as login).
 // In future we could split these into multiple mutex/cv pairs, one for each type of
 // callback.
@@ -90,44 +77,40 @@ pthread_mutex_t request_mutex;  // Mutex to lock on when waiting for a (libspoti
 pthread_cond_t  request_cv;     // Conditional var for blocking for a callback
 
 // This basicaly loops waiting for notify_main_threads
-static void *session_main_thread(void *data) {
+void *session_main_thread(void *data) {
 
-	//DEBUG_PRINT("session_main_thread\n");
+	php_spotify_session * resource = data;
 
-wait_for_session:
+	DEBUG_PRINT("session_main_thread start\n");
 
-	DEBUG_PRINT("session_main_thread wait_for_session\n");
+	//FILE *fp;
+	//fp = fopen("/tmp/libspotify-php/log", "a+");
 
-	while(running) {
+	//fprintf(fp, "session_main_thread %d:%X", getpid(), (unsigned int)pthread_self());
+	//fprintf(fp, "session_main_thread %p", &resource->sem);
+
+	//php_error_docref(NULL TSRMLS_CC, E_NOTICE, "session_main_thread %d:%X", getpid(), (unsigned int)pthread_self());
+	//php_error_docref(NULL TSRMLS_CC, E_NOTICE, "session_main_thread %p", &session_sem);
+
+	// Wait until the session is good
+	while(resource->running) {
+		// Read it into a seperate var so it doesn't get changed underneath us
+		sp_session * session = resource->session;
+		if (session != NULL) {
+			int timeout = -1; // TODO use the timeout
+
+			sp_session_process_events(session, &timeout);
+		}
 
 		// Wait until a callback is fired
-		sem_wait(&session_sem);
+		sem_wait(&resource->sem);
 
-		if (session) // Break when the session is good
-			break;
-	}
-
-	pthread_mutex_unlock(&session_mutex);
-
-	DEBUG_PRINT("session_main_thread main\n");
-
-	while(running) {
-		int timeout = -1; // TODO use the timeout
-
-		sp_session_process_events(session, &timeout);
-
-		// Wait until a callback is fired
-		sem_wait(&session_sem);
-
-		DEBUG_PRINT("session_main_thread wakeup timeout:%d\n", timeout);
-
-		// Check if the session has been killed
-		if (session == NULL)
-			// Not very elegant, goto, but it is neat
-			goto wait_for_session;
+		DEBUG_PRINT("session_main_thread wakeup\n");
 	}
 
 	DEBUG_PRINT("session_main_thread end\n");
+
+	//fclose(fp);
 
 	pthread_exit(NULL);
 }
@@ -195,66 +178,11 @@ void request_shutdown() {
 	pthread_cond_destroy (&request_cv);
 }
 
-int session_init() {
-	int err;
-	pthread_mutexattr_t attr;
-
-	session = NULL;
-	session_resource = NULL;
-	running = 1;
-
-	// I hate to do it, but the mutex must be recursive. That's because
-	// libspotify sometimes calls the callbacks from the main thread (which causes a deadlock)
-	pthread_mutexattr_init(&attr);
-	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-
-	err = pthread_mutex_init(&session_mutex, &attr);
-	pthread_mutexattr_destroy(&attr);
-	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_mutex_init() failed!");
-		return FAILURE;
-	}
-
-	err = sem_init(&session_sem, 0, 0);
-	if ( err ) {
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, sem_init() failed!");
-
-		pthread_mutex_destroy(&session_mutex);
-		return FAILURE;
-	}
-
-	// Create a single "main" thread, used to handle sp_session_process_events()
-	err = pthread_create(&session_thread, NULL, session_main_thread, NULL);
-    if ( err ) {
-    	php_error_docref(NULL TSRMLS_CC, E_ERROR, "Internal error, pthread_create() failed!");
-    	pthread_mutex_destroy(&session_mutex);
-    	sem_destroy          (&session_sem);
-    	return FAILURE;
-    }
-
-    return SUCCESS;
-}
-
-void session_shutdown() {
-	DEBUG_PRINT("session_shutdown\n");
-
-	running = 0;
-	sem_post(&session_sem);
-	pthread_join(session_thread, NULL);
-
-	pthread_mutex_destroy(&session_mutex);
-	sem_destroy (&session_sem);
-}
-
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(spotify)
 {
 	DEBUG_PRINT("PHP_MINIT_FUNCTION\n");
-
-	if (session_init() == FAILURE) {
-		return FAILURE;
-	}
 
     if (request_init() == FAILURE) {
     	return FAILURE;
@@ -302,7 +230,6 @@ PHP_MSHUTDOWN_FUNCTION(spotify)
 {
 	DEBUG_PRINT("PHP_MSHUTDOWN_FUNCTION\n");
 
-	session_shutdown();
 	request_shutdown();
 
 	return SUCCESS;
