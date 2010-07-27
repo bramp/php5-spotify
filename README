@@ -13,17 +13,3 @@ Build Instructions
 		extension=<path to extensions>/spotify.so
 
 There is additional user documentation in the doc.html
-
-Developer docs:
-	libspotify only allows one session per process.
-	Each sp_session instance is wrapped in a php_spotify_session
-	There can only be one php_spotify_session per process which is stored in EG(persistent_list)
-	
-	When a login occurs
-		First check if a php_spotify_session already exists
-			If it does check we are logging in with the same username
-				If not, error out.
-		Otherwise create a new php_spotify_session and session.
-			The php_spotify_session contains pthread_t and other syncronisation objects
-
-	The php_spotify_session will be deleted when the PHP process ends
