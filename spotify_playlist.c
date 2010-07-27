@@ -12,29 +12,29 @@
 #include "php_spotify.h"
 
 static void tracks_added(sp_playlist *pl, sp_track *const *tracks, int num_tracks, int position, void *userdata) {
-	//DEBUG_PRINT("tracks_added\n");
+	DEBUG_PRINT("tracks_added\n");
 }
 static void tracks_removed(sp_playlist *pl, const int *tracks, int num_tracks, void *userdata) {
-	//DEBUG_PRINT("tracks_removed\n");
+	DEBUG_PRINT("tracks_removed\n");
 }
 static void tracks_moved(sp_playlist *pl, const int *tracks, int num_tracks, int new_position, void *userdata) {
-	//DEBUG_PRINT("tracks_moved\n");
+	DEBUG_PRINT("tracks_moved\n");
 }
 static void playlist_renamed(sp_playlist *pl, void *userdata) {
-	//DEBUG_PRINT("playlist_renamed\n");
+	DEBUG_PRINT("playlist_renamed\n");
 }
 static void playlist_state_changed(sp_playlist *pl, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
-	//DEBUG_PRINT("playlist_state_changed\n");
+	DEBUG_PRINT("playlist_state_changed\n");
 	request_wake();
 }
 static void playlist_update_in_progress(sp_playlist *pl, bool done, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
-	//DEBUG_PRINT("playlist_update_in_progress (%d)\n", done);
+	DEBUG_PRINT("playlist_update_in_progress (%d)\n", done);
 
 	if (done)
 		request_wake();
@@ -43,7 +43,7 @@ static void playlist_metadata_updated(sp_playlist *pl, void *userdata) {
 	php_spotify_playlist *playlist = userdata;
 	assert(playlist != NULL);
 
-	//DEBUG_PRINT("playlist_metadata_updated\n");
+	DEBUG_PRINT("playlist_metadata_updated\n");
 
 	request_wake();
 }
@@ -69,14 +69,14 @@ static int wait_for_playlist_pending_changes(php_spotify_playlist *playlist) {
 
 	DEBUG_PRINT("wait_for_playlist_pending_changes\n");
 
-	// Block for a max of 10 seconds
+	// Block for a max of SPOTIFY_TIMEOUT seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 
 	request_lock();
 
 	while(err == 0) {
-		//DEBUG_PRINT("wait_for_playlist_pending_changes loop\n");
+		DEBUG_PRINT("wait_for_playlist_pending_changes loop\n");
 		int pending_changes;
 
 		session_lock(session);
@@ -105,16 +105,16 @@ static int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 	assert(playlist != NULL);
 	session = playlist->session;
 
-	//DEBUG_PRINT("wait_for_playlist_loaded start\n");
+	DEBUG_PRINT("wait_for_playlist_loaded start\n");
 
-	// Block for a max of 10 seconds
+	// Block for a max of SPOTIFY_TIMEOUT seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 
 	request_lock();
 
 	while(err == 0) {
-		//DEBUG_PRINT("wait_for_playlist_loaded loop\n");
+		DEBUG_PRINT("wait_for_playlist_loaded loop\n");
 		int loaded;
 
 		session_lock(session);
@@ -130,7 +130,7 @@ static int wait_for_playlist_loaded(php_spotify_playlist *playlist) {
 
 	request_unlock();
 
-	//DEBUG_PRINT("wait_for_playlist_loaded end(%d)\n", err);
+	DEBUG_PRINT("wait_for_playlist_loaded end(%d)\n", err);
 	return err;
 }
 
@@ -460,10 +460,11 @@ PHP_FUNCTION(spotify_playlist_uri) {
     	php_error_docref(NULL TSRMLS_CC, E_WARNING, "There was a error creating the link");
 		RETURN_FALSE;
     }
+#define MAX_LINK_SIZE 256
 
-    link_uri = emalloc(256);
+    link_uri = emalloc(MAX_LINK_SIZE);
 
-    sp_link_as_string(link, link_uri, 256);
+    sp_link_as_string(link, link_uri, MAX_LINK_SIZE);
     sp_link_release(link);
 
     session_unlock(session);

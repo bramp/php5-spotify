@@ -94,7 +94,7 @@ int wait_for_logged_out(php_spotify_session *session) {
 
 	DEBUG_PRINT("wait_for_logged_out\n");
 
-	// Block for a max of 5 seconds
+	// Block for a max of SPOTIFY_TIMEOUT seconds
 	clock_gettime(CLOCK_REALTIME, &ts);
 	ts.tv_sec += SPOTIFY_TIMEOUT;
 

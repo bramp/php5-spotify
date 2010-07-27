@@ -16,6 +16,10 @@
 extern zend_module_entry spotify_module_entry;
 #define phpext_spotify_ptr &spotify_module_entry
 
+#ifdef ZTS
+# include "TSRM.h"
+#endif
+
 #ifdef PHP_WIN32
 #	define PHP_SPOTIFY_API __declspec(dllexport)
 #elif defined(__GNUC__) && __GNUC__ >= 4
@@ -30,10 +34,6 @@ extern zend_module_entry spotify_module_entry;
 # define DEBUG_PRINT(f, s...) php_printf("%d:%X ", getpid(), (unsigned int)pthread_self()); php_printf(f, ## s)
 #else
 # define DEBUG_PRINT(f, s...)
-#endif
-
-#ifdef ZTS
-# include "TSRM.h"
 #endif
 
 // The number of seconds to wait for pending events
@@ -64,6 +64,7 @@ typedef struct _php_spotify_playlist {
 	sp_playlist *playlist;         // Spotify playlist
 } php_spotify_playlist;
 
+// Hold the list of resources
 extern int le_spotify_session;
 extern int le_spotify_playlist;
 
