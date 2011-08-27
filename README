@@ -1,3 +1,10 @@
+php-spotify
+by Andrew Brampton (c) 2010
+
+This is a simple PHP extension that wraps some of the functionality of libspotify.
+
+Basically you can login and manuliate playlists.
+
 Build Instructions
 
 	First install libspotify following their instructions
